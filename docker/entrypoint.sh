@@ -10,7 +10,12 @@ fi
 
 echo "Detected environment: ${INSTALL_GROUP}"
 echo "Installing dependencies with Poetry…"
-poetry install --with "${INSTALL_GROUP}"
+# If venv exists, just sync to the lock (fast no-op when nothing changed)
+if [ -x "/app/.venv/bin/python" ]; then
+  poetry install --with "${INSTALL_GROUP}" --sync --no-interaction --no-ansi
+else
+  poetry install --with "${INSTALL_GROUP}" --no-interaction --no-ansi
+fi
 
 echo "Running: ${RUN_SCRIPT}"
 # Forward any extra args to your script: `docker run ... -- --arg value`

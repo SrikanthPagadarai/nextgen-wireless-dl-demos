@@ -4,6 +4,13 @@ ENV DEBIAN_FRONTEND=noninteractive \
     POETRY_HOME=/root/.local \
     PATH=/root/.local/bin:$PATH
 
+# Cache dirs (so wheels/metadata are reused between runs)
+ENV PIP_CACHE_DIR=/root/.cache/pip \
+    POETRY_CACHE_DIR=/root/.cache/pypoetry
+
+# Persist caches even if the container exits
+VOLUME ["/root/.cache/pip", "/root/.cache/pypoetry"]
+
 # System deps
  RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-venv python3-pip build-essential curl git ca-certificates \
