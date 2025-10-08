@@ -40,7 +40,6 @@ from sionna.phy.fec.ldpc import LDPC5GEncoder, LDPC5GDecoder
 from sionna.phy.mapping import Mapper, Demapper, BinarySource
 from sionna.phy.utils import ebnodb2no, sim_ber, compute_ber
 
-
 class Model(Block):
     """This block simulates OFDM MIMO transmissions over the CDL model.
 
