@@ -10,7 +10,7 @@ class Channel:
     Uses the *shared* CSI.h_freq (same tensor seen by Tx/Rx).
     """
     def __init__(self, cfg: Config, csi: CSI):
-        self.cfg = cfg.build()
+        self.cfg = cfg
         self.csi = csi
         self.rg = self.csi.rg
         self._apply = ApplyOFDMChannel(add_awgn=True)

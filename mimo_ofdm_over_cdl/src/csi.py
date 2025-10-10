@@ -24,7 +24,7 @@ class CSI:
     """
 
     def __init__(self, cfg: Config, batch_size: int | tf.Tensor):
-        self.cfg = cfg.build()
+        self.cfg = cfg
         self.rg: ResourceGrid = self.cfg.rg
         self.batch_size = tf.convert_to_tensor(batch_size, dtype=tf.int32)
 

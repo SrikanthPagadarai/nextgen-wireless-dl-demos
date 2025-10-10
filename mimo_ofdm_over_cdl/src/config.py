@@ -1,11 +1,18 @@
 from dataclasses import dataclass, field
 from typing import Literal, Tuple
+from enum import IntEnum
 import numpy as np
 from sionna.phy.mimo import StreamManagement
 from sionna.phy.ofdm import ResourceGrid
 
 Direction = Literal["uplink", "downlink"]
 CDLModel = Literal["A", "B", "C", "D", "E"]
+
+
+class BitsPerSym(IntEnum):
+    BPSK  = 1   # 2^1 = 2-QAM
+    QPSK  = 2   # 2^2 = 4-QAM
+    QAM16 = 4   # 2^4 = 16-QAM
 
 @dataclass
 class Config:
@@ -31,6 +38,7 @@ class Config:
     delay_spread: float = 300e-9 # seconds
     carrier_frequency: float = 2.6e9 # Hz
     speed: float = 0.0 # m/s (UE speed)
+    num_bits_per_symbol: BitsPerSym = BitsPerSym.QPSK
 
     # hard-coded PHY/system parameters
     _subcarrier_spacing: float = field(init=False, default=15e3, repr=False)
@@ -57,7 +65,7 @@ class Config:
 
     # build/cache objects used across modules
     def build(self) -> "Config":
-        # For simplicity, map one stream per UT antenna
+        # map one stream per UT antenna
         self._num_streams_per_tx = self._num_ut_ant
         # Stream matrix: one TX, one RX stream group
         self._sm = StreamManagement(np.array([[1]]), self._num_streams_per_tx)
@@ -75,10 +83,15 @@ class Config:
             pilot_ofdm_symbol_indices=list(self._pilot_ofdm_symbol_indices),
         )
 
-        # Code lengths derived from RG payload size
-        self._n = int(self._rg.num_data_symbols * self._num_bits_per_symbol)
+        # code lengths derived from RG payload size
+        self._n = int(self._rg.num_data_symbols * self.num_bits_per_symbol)
         self._k = int(self._n * self._coderate)
         return self
+
+    def __post_init__(self):
+        if not isinstance(self.num_bits_per_symbol, BitsPerSym):
+            self.num_bits_per_symbol = BitsPerSym(self.num_bits_per_symbol)
+        self.build()
 
     # get-methods
     @property
@@ -144,10 +157,6 @@ class Config:
     @property
     def modulation(self) -> str:
         return self._modulation
-
-    @property
-    def num_bits_per_symbol(self) -> int:
-        return self._num_bits_per_symbol
 
     @property
     def coderate(self) -> float:

@@ -11,7 +11,7 @@ class Rx:
     Full receiver chain; uses the *shared* CSI.h_freq for UL perfect-CSI path.
     """
     def __init__(self, cfg: Config, csi: CSI):
-        self.cfg = cfg.build()
+        self.cfg = cfg
         self.csi = csi
         self.perfect_csi = cfg.perfect_csi
         self.rg = self.csi.rg
@@ -27,19 +27,12 @@ class Rx:
 
         # Perfect vs estimated CSI
         if self.perfect_csi:
-            h_hat = self.csi.remove_nulled_scs(self.csi.h_freq)
-            if self.cfg.direction == "downlink":
-                if g is None:
-                    raise ValueError("perfect_csi=True (downlink) requires Tx-provided 'g'.")
-                h_hat = g
-            '''
             if self.cfg.direction == "uplink":
                 h_hat = self.csi.remove_nulled_scs(self.csi.h_freq)
             else:
                 if g is None:
                     raise ValueError("perfect_csi=True (downlink) requires Tx-provided 'g'.")
                 h_hat = g
-            '''
             err_var = 0.0
         else:
             h_hat, err_var = self._ce(y, no)

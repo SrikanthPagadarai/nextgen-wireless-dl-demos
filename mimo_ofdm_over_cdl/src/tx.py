@@ -17,7 +17,7 @@ class Tx:
       BinarySource -> LDPC5GEncoder -> Mapper -> ResourceGridMapper -> (optional) RZFPrecoder
     """
     def __init__(self, cfg: Config, csi: CSI):
-        self.cfg = cfg.build()
+        self.cfg = cfg
         self.csi = csi
         self.rg = self.csi.rg
 
