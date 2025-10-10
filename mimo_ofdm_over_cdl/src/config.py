@@ -1,0 +1,158 @@
+from dataclasses import dataclass, field
+from typing import Literal, Tuple
+import numpy as np
+from sionna.phy.mimo import StreamManagement
+from sionna.phy.ofdm import ResourceGrid
+
+Direction = Literal["uplink", "downlink"]
+CDLModel = Literal["A", "B", "C", "D", "E"]
+
+@dataclass
+class Config:
+    """
+    Global configuration for one simulation setup.
+
+    User-settable:
+      - direction: "uplink" | "downlink"
+      - perfect_csi: bool (receiver behavior)
+      - cdl_model, delay_spread, carrier_frequency, speed: channel params
+
+    Everything else is hard-coded and exposed via read-only properties.
+    On build(), creates:
+      - ResourceGrid (rg)
+      - StreamManagement (sm)
+      - LDPC lengths (k, n)
+    """
+
+    # user-settable parameters
+    direction: Direction = "uplink"
+    perfect_csi: bool = False
+    cdl_model: CDLModel = "D"
+    delay_spread: float = 300e-9 # seconds
+    carrier_frequency: float = 2.6e9 # Hz
+    speed: float = 0.0 # m/s (UE speed)
+
+    # hard-coded PHY/system parameters
+    _subcarrier_spacing: float = field(init=False, default=15e3, repr=False)
+    _fft_size: int = field(init=False, default=76, repr=False)
+    _num_ofdm_symbols: int = field(init=False, default=14, repr=False)
+    _cyclic_prefix_length: int = field(init=False, default=6, repr=False)
+    _num_guard_carriers: Tuple[int, int] = field(init=False, default=(5, 6), repr=False)
+    _dc_null: bool = field(init=False, default=True, repr=False)
+    _pilot_pattern: str = field(init=False, default="kronecker", repr=False)
+    _pilot_ofdm_symbol_indices: Tuple[int, ...] = field(init=False, default=(2, 11), repr=False)
+    _num_ut_ant: int = field(init=False, default=4, repr=False)
+    _num_bs_ant: int = field(init=False, default=8, repr=False)
+    _modulation: str = field(init=False, default="qam", repr=False)
+    _num_bits_per_symbol: int = field(init=False, default=2, repr=False)  # QPSK
+    _coderate: float = field(init=False, default=0.5, repr=False)
+    _seed: int = field(init=False, default=42, repr=False)
+
+    # derived system parameters
+    _sm: StreamManagement = field(init=False, repr=False)
+    _rg: ResourceGrid = field(init=False, repr=False)
+    _k: int = field(init=False, repr=False)
+    _n: int = field(init=False, repr=False)
+    _num_streams_per_tx: int = field(init=False, repr=False)
+
+    # build/cache objects used across modules
+    def build(self) -> "Config":
+        # For simplicity, map one stream per UT antenna
+        self._num_streams_per_tx = self._num_ut_ant
+        # Stream matrix: one TX, one RX stream group
+        self._sm = StreamManagement(np.array([[1]]), self._num_streams_per_tx)
+
+        self._rg = ResourceGrid(
+            num_ofdm_symbols=self._num_ofdm_symbols,
+            fft_size=self._fft_size,
+            subcarrier_spacing=self._subcarrier_spacing,
+            num_tx=1,
+            num_streams_per_tx=self._num_streams_per_tx,
+            cyclic_prefix_length=self._cyclic_prefix_length,
+            num_guard_carriers=list(self._num_guard_carriers),
+            dc_null=self._dc_null,
+            pilot_pattern=self._pilot_pattern,
+            pilot_ofdm_symbol_indices=list(self._pilot_ofdm_symbol_indices),
+        )
+
+        # Code lengths derived from RG payload size
+        self._n = int(self._rg.num_data_symbols * self._num_bits_per_symbol)
+        self._k = int(self._n * self._coderate)
+        return self
+
+    # get-methods
+    @property
+    def rg(self) -> ResourceGrid:
+        return self._rg
+
+    @property
+    def sm(self) -> StreamManagement:
+        return self._sm
+
+    @property
+    def k(self) -> int:
+        return self._k
+
+    @property
+    def n(self) -> int:
+        return self._n
+
+    @property
+    def num_streams_per_tx(self) -> int:
+        return self._num_streams_per_tx
+
+    @property
+    def subcarrier_spacing(self) -> float:
+        return self._subcarrier_spacing
+
+    @property
+    def fft_size(self) -> int:
+        return self._fft_size
+
+    @property
+    def num_ofdm_symbols(self) -> int:
+        return self._num_ofdm_symbols
+
+    @property
+    def cyclic_prefix_length(self) -> int:
+        return self._cyclic_prefix_length
+
+    @property
+    def num_guard_carriers(self) -> Tuple[int, int]:
+        return self._num_guard_carriers
+
+    @property
+    def dc_null(self) -> bool:
+        return self._dc_null
+
+    @property
+    def pilot_pattern(self) -> str:
+        return self._pilot_pattern
+
+    @property
+    def pilot_ofdm_symbol_indices(self) -> Tuple[int, ...]:
+        return self._pilot_ofdm_symbol_indices
+
+    @property
+    def num_ut_ant(self) -> int:
+        return self._num_ut_ant
+
+    @property
+    def num_bs_ant(self) -> int:
+        return self._num_bs_ant
+
+    @property
+    def modulation(self) -> str:
+        return self._modulation
+
+    @property
+    def num_bits_per_symbol(self) -> int:
+        return self._num_bits_per_symbol
+
+    @property
+    def coderate(self) -> float:
+        return self._coderate
+
+    @property
+    def seed(self) -> int:
+        return self._seed

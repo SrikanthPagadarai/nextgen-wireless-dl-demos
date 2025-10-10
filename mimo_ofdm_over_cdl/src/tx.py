@@ -1,0 +1,73 @@
+import os
+if os.getenv("CUDA_VISIBLE_DEVICES") is None:
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+import tensorflow as tf
+from typing import Dict, Any, Optional
+from sionna.phy.mapping import BinarySource, Mapper
+from sionna.phy.fec.ldpc import LDPC5GEncoder
+from sionna.phy.ofdm import ResourceGridMapper, RZFPrecoder
+from .config import Config
+from .csi import CSI
+
+class Tx:
+    """
+    Uses a shared CSI instance (composition) so Tx, Channel, Rx all see the SAME h_freq.
+    Pipeline:
+      BinarySource -> LDPC5GEncoder -> Mapper -> ResourceGridMapper -> (optional) RZFPrecoder
+    """
+    def __init__(self, cfg: Config, csi: CSI):
+        self.cfg = cfg.build()
+        self.csi = csi
+        self.rg = self.csi.rg
+
+        self._binary_source = BinarySource()
+        self._encoder = LDPC5GEncoder(self.cfg.k, self.cfg.n)
+        self._mapper = Mapper(self.cfg.modulation, self.cfg.num_bits_per_symbol)
+        self._rg_mapper = ResourceGridMapper(self.rg)
+
+        self._precoder: Optional[RZFPrecoder] = None
+        if self.cfg.direction == "downlink":
+            self._precoder = RZFPrecoder(self.rg, self.cfg.sm, return_effective_channel=True)
+
+        self._num_streams_per_tx = self.cfg.num_streams_per_tx
+
+    @tf.function
+    def __call__(self, batch_size: tf.Tensor) -> Dict[str, Any]:
+        self.csi.assert_batch(batch_size)
+
+        # Bits -> code -> symbols -> RG
+        b = self._binary_source([batch_size, 1, self._num_streams_per_tx, self.cfg.k])
+        c = self._encoder(b)
+        x = self._mapper(c)
+        x_rg = self._rg_mapper(x)
+
+        # If downlink, do precoding using the *shared* h_freq
+        x_rg_tx = x_rg
+        g = None
+        if self._precoder is not None:
+            x_rg_tx, g = self._precoder(x_rg, self.csi.h_freq)
+
+        return {"b": b, "c": c, "x": x, "x_rg": x_rg, "x_rg_tx": x_rg_tx, "g": g}
+
+
+if __name__ == "__main__":
+    """
+    Example usage for standalone TX stage.
+    Creates CSI once, then runs the TX pipeline.
+    """
+    from csi import CSI
+
+    cfg = Config(direction="downlink")
+    B = tf.constant(4, dtype=tf.int32)
+
+    csi = CSI(cfg, batch_size=B)
+    tx = Tx(cfg, csi)
+    out = tx(B)
+
+    print("\n[TX] Outputs:")
+    for k, v in out.items():
+        if v is not None:
+            print(f"{k:10s}: shape={v.shape}")
+        else:
+            print(f"{k:10s}: None")
