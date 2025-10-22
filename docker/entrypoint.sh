@@ -1,23 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd /app
+# FAST-PATH: if user asked for a shell, honor it BEFORE touching /app
+case "${1:-}" in
+  bash|/bin/bash)
+    shift || true
+    exec bash "$@"
+    ;;
+  sh|/bin/sh)
+    shift || true
+    exec sh "$@"
+    ;;
+esac
 
-fast_exec_shell_if_requested() {
-  case "${1:-}" in
-    bash|/bin/bash)
-      shift || true
-      exec bash "$@"
-      ;;
-    sh|/bin/sh)
-      shift || true
-      exec sh "$@"
-      ;;
-  esac
-}
-
-# Always honor explicit shell request BEFORE any dependency work
-fast_exec_shell_if_requested "${1:-}" "$@"
+# Only cd into /app if not explicitly skipped (helps diagnose bind-mount issues)
+if [[ "${SKIP_CD_APP:-0}" != "1" ]]; then
+  cd /app
+fi
 
 # --- Optional Poetry sync (disabled by default) ---
 # Set POETRY_AUTO_SYNC=1 to enable install/sync at container start.
@@ -34,12 +33,10 @@ maybe_sync_poetry() {
     echo "Skipping Poetry sync (POETRY_AUTO_SYNC!=1)."
     return 0
   fi
-
   if ! command -v poetry >/dev/null 2>&1; then
     echo "Poetry not found in PATH. Skipping sync."
     return 0
   fi
-
   local group
   group="$(detect_install_group)"
   echo "Poetry sync enabled. Detected environment: ${group}"
@@ -50,7 +47,6 @@ maybe_sync_poetry() {
   fi
 }
 
-# If a Python script/module is requested, we may want deps; otherwise we'll skip
 # Decide what to run
 SCRIPT_TO_RUN=""
 RUN_MODE="script"  # or "module"
@@ -60,7 +56,6 @@ if [[ $# -gt 0 ]]; then
     SCRIPT_TO_RUN="$1"
     shift
   else
-    # Treat as module name (e.g., package.module)
     RUN_MODE="module"
     SCRIPT_TO_RUN="$1"
     shift
@@ -70,7 +65,6 @@ elif [[ -n "${RUN_SCRIPT:-}" ]]; then
 fi
 
 if [[ -z "$SCRIPT_TO_RUN" ]]; then
-  # Interactive menu (lightweight find, depth <= 2 to avoid slow scans on huge mounts)
   echo "No script provided. Select one:"
   mapfile -t candidates < <( \
     { \
@@ -79,7 +73,7 @@ if [[ -z "$SCRIPT_TO_RUN" ]]; then
     } | sed 's|^\./||' | awk '!seen[$0]++' \
   )
   if [ "${#candidates[@]}" -eq 0 ]; then
-    echo "No Python scripts found under /app. Opening a shell."
+    echo "No Python scripts found. Opening a shell."
     exec bash
   fi
   select choice in "${candidates[@]}" "bash (open shell)"; do
@@ -95,7 +89,6 @@ if [[ -z "$SCRIPT_TO_RUN" ]]; then
   done
 fi
 
-# Only now (when we’re about to run Python) consider syncing dependencies
 maybe_sync_poetry
 
 if [[ "$RUN_MODE" == "module" && "$SCRIPT_TO_RUN" != *.py ]]; then
