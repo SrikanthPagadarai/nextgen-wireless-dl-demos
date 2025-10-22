@@ -3,7 +3,24 @@ set -euo pipefail
 
 cd /app
 
-# --- Helper: install deps for CPU/GPU depending on availability ---
+fast_exec_shell_if_requested() {
+  case "${1:-}" in
+    bash|/bin/bash)
+      shift || true
+      exec bash "$@"
+      ;;
+    sh|/bin/sh)
+      shift || true
+      exec sh "$@"
+      ;;
+  esac
+}
+
+# Always honor explicit shell request BEFORE any dependency work
+fast_exec_shell_if_requested "${1:-}" "$@"
+
+# --- Optional Poetry sync (disabled by default) ---
+# Set POETRY_AUTO_SYNC=1 to enable install/sync at container start.
 detect_install_group() {
   if command -v nvidia-smi >/dev/null 2>&1 || [ -d "/proc/driver/nvidia" ]; then
     echo "gpu"
@@ -12,10 +29,20 @@ detect_install_group() {
   fi
 }
 
-ensure_poetry_env() {
-  local group="$1"
-  echo "Detected environment: ${group}"
-  echo "Installing/syncing dependencies with Poetry…"
+maybe_sync_poetry() {
+  if [[ "${POETRY_AUTO_SYNC:-0}" != "1" ]]; then
+    echo "Skipping Poetry sync (POETRY_AUTO_SYNC!=1)."
+    return 0
+  fi
+
+  if ! command -v poetry >/dev/null 2>&1; then
+    echo "Poetry not found in PATH. Skipping sync."
+    return 0
+  fi
+
+  local group
+  group="$(detect_install_group)"
+  echo "Poetry sync enabled. Detected environment: ${group}"
   if [ -x "/app/.venv/bin/python" ]; then
     poetry install --with "${group}" --sync --no-interaction --no-ansi
   else
@@ -23,74 +50,58 @@ ensure_poetry_env() {
   fi
 }
 
-# --- Helper: interactive menu to pick a script ---
-pick_script_interactively() {
-  echo "No script specified. Scanning for likely entry scripts…"
-  # Prefer common entry-point names; fall back to all *.py (depth <= 3)
-  mapfile -t candidates < <( \
-    { \
-      find . -maxdepth 3 -type f \( -name "train.py" -o -name "inference.py" -o -name "sim.py" -o -name "main.py" \); \
-      find . -maxdepth 3 -type f -name "*.py"; \
-    } | sed 's|^\./||' | awk '!seen[$0]++' \
-  )
-
-  if [ "${#candidates[@]}" -eq 0 ]; then
-    echo "No Python scripts found under /app. Dropping into a shell."
-    exec bash
-  fi
-
-  echo
-  echo "Select a script to run (enter number):"
-  select choice in "${candidates[@]}" "bash (open shell)"; do
-    if [[ "$REPLY" == "$(( ${#candidates[@]} + 1 ))" ]]; then
-      exec bash
-    fi
-    if [[ -n "${choice:-}" && -f "$choice" ]]; then
-      echo "$choice"
-      return 0
-    fi
-    echo "Invalid selection. Try again."
-  done
-}
-
-# --- Main ---
-GROUP="$(detect_install_group)"
-ensure_poetry_env "$GROUP"
-
-# USAGE MODES:
-# 1) docker run <img> bash                   -> open shell
-# 2) docker run <img> path/to/script.py ...  -> run that script with args
-# 3) docker run <img>                        -> interactive menu to pick a script
-# 4) docker run -e RUN_SCRIPT=... <img> ...  -> use RUN_SCRIPT unless an explicit script is given as $1
-
-if [[ "${1:-}" == "bash" ]]; then
-  shift || true
-  exec bash "$@"
-fi
-
+# If a Python script/module is requested, we may want deps; otherwise we'll skip
+# Decide what to run
 SCRIPT_TO_RUN=""
+RUN_MODE="script"  # or "module"
+
 if [[ $# -gt 0 ]]; then
-  # First arg provided: treat it as script path if it's a .py file; otherwise pass to python -m
   if [[ "$1" == *.py && -f "$1" ]]; then
     SCRIPT_TO_RUN="$1"
     shift
   else
-    # If it's a module like "package.module", run with -m
-    MODULE_CAND="$1"
+    # Treat as module name (e.g., package.module)
+    RUN_MODE="module"
+    SCRIPT_TO_RUN="$1"
     shift
-    if [[ -n "$MODULE_CAND" ]]; then
-      echo "Running module: $MODULE_CAND"
-      exec poetry run python3 -m "$MODULE_CAND" "$@"
-    fi
   fi
 elif [[ -n "${RUN_SCRIPT:-}" ]]; then
   SCRIPT_TO_RUN="$RUN_SCRIPT"
 fi
 
 if [[ -z "$SCRIPT_TO_RUN" ]]; then
-  # Prompt user to pick one (requires -it)
-  SCRIPT_TO_RUN="$(pick_script_interactively)"
+  # Interactive menu (lightweight find, depth <= 2 to avoid slow scans on huge mounts)
+  echo "No script provided. Select one:"
+  mapfile -t candidates < <( \
+    { \
+      find . -maxdepth 2 -type f \( -name "training.py" -o -name "inference.py" -o -name "train.py" -o -name "sim.py" -o -name "main.py" \); \
+      find . -maxdepth 2 -type f -name "*.py"; \
+    } | sed 's|^\./||' | awk '!seen[$0]++' \
+  )
+  if [ "${#candidates[@]}" -eq 0 ]; then
+    echo "No Python scripts found under /app. Opening a shell."
+    exec bash
+  fi
+  select choice in "${candidates[@]}" "bash (open shell)"; do
+    if [[ "$REPLY" == "$(( ${#candidates[@]} + 1 ))" ]]; then
+      exec bash
+    fi
+    if [[ -n "${choice:-}" && -f "$choice" ]]; then
+      SCRIPT_TO_RUN="$choice"
+      RUN_MODE="script"
+      break
+    fi
+    echo "Invalid selection. Try again."
+  done
 fi
 
-echo "Running: ${SCRIPT_TO_RUN} $*"
-exec poetry run python3 "${SCRIPT_TO_RUN}" "$@"
+# Only now (when we’re about to run Python) consider syncing dependencies
+maybe_sync_poetry
+
+if [[ "$RUN_MODE" == "module" && "$SCRIPT_TO_RUN" != *.py ]]; then
+  echo "Running module: $SCRIPT_TO_RUN $*"
+  exec poetry run python3 -m "$SCRIPT_TO_RUN" "$@"
+else
+  echo "Running: $SCRIPT_TO_RUN $*"
+  exec poetry run python3 "$SCRIPT_TO_RUN" "$@"
+fi
