@@ -36,8 +36,9 @@ COPY . /app
 ENV RUN_SCRIPT=""
 
 # Copy entrypoint that allows choosing which script to run
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint
+RUN chmod +x /usr/local/bin/entrypoint
 
-# Default entrypoint
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/entrypoint"]
+CMD ["bash"]
+
