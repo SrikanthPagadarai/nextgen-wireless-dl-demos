@@ -1,7 +1,10 @@
 # Build & Run
 
 ### Build
-`$ docker build -t sionna-dl-6g .`
+#### CPU build
+`$ docker build -t sionna-dl-6g --build-arg POETRY_WITH=cpu .`
+#### GPU build
+`$ docker build -t sionna-dl-6g --build-arg POETRY_WITH=gpu .`
 
 ### Run on a CPU-only host
 `$ docker run -it sionna-dl-6g`

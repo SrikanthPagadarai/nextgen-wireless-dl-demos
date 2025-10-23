@@ -1,44 +1,49 @@
 FROM ubuntu:24.04
 
+# --- Environment ---
 ENV DEBIAN_FRONTEND=noninteractive \
-    POETRY_HOME=/root/.local \
-    PATH=/root/.local/bin:$PATH \
-    PIP_CACHE_DIR=/root/.cache/pip \
-    POETRY_CACHE_DIR=/root/.cache/pypoetry
+    PYTHONUNBUFFERED=1 \
+    VIRTUAL_ENV=/opt/venv \
+    PATH="/opt/venv/bin:${PATH}"
 
-# Persist caches even if the container exits
-VOLUME ["/root/.cache/pip", "/root/.cache/pypoetry"]
-
-# System deps
+# --- System packages ---
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-venv python3-pip \
-    build-essential curl git ca-certificates bash findutils \
+    build-essential curl git ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
-# Install Poetry (via official install script)
-RUN curl -sSL https://install.python-poetry.org | python3 -
+# --- Create virtual environment ---
+RUN python3 -m venv "${VIRTUAL_ENV}"
 
+# --- Upgrade pip toolchain in venv ---
+RUN "${VIRTUAL_ENV}/bin/pip" install --no-cache-dir --upgrade pip setuptools wheel
+
+# --- Install Poetry into the SAME venv ---
+RUN "${VIRTUAL_ENV}/bin/pip" install --no-cache-dir "poetry==1.8.3"
+
+# Sanity check: Poetry should be in PATH via /opt/venv/bin
+RUN poetry --version
+
+# --- App root ---
 WORKDIR /app
 
-# Copy only dependency files first (for better Docker layer caching)
+# --- Copy dependency manifests first (better layer caching) ---
 COPY pyproject.toml poetry.lock* /app/
 
-# Create a virtualenv in /app/.venv so it stays with the project
-ENV POETRY_VIRTUALENVS_IN_PROJECT=true
+# --- Install deps into the SAME venv (no nested venvs) ---
+# Optional build-arg to include a group, e.g. --build-arg POETRY_WITH=cpu or gpu
+ARG POETRY_WITH=
+RUN poetry config virtualenvs.create false \
+ && (poetry lock --no-interaction --no-update || poetry lock --no-interaction) \
+ && poetry install --no-interaction --no-root --only main ${POETRY_WITH:+--with ${POETRY_WITH}}
 
-# Install base deps (no groups yet; runtime entrypoint will sync specific CPU/GPU group)
-RUN poetry install --no-interaction --no-ansi --no-root || true
-
-# Copy the rest of your project
+# --- Copy the rest of the project ---
 COPY . /app
 
-# Optional default (can be overridden at runtime, or chosen interactively)
-ENV RUN_SCRIPT=""
+# --- Entrypoint & default command ---
+# Ensure your repo has docker/entrypoint.sh and it uses /app as the working dir
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
-# Copy entrypoint that allows choosing which script to run
-COPY docker/entrypoint.sh /usr/local/bin/entrypoint
-RUN chmod +x /usr/local/bin/entrypoint
-
-ENTRYPOINT ["/usr/local/bin/entrypoint"]
-CMD ["bash"]
-
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["python3", "mimo_ofdm_over_cdl/training.py"]
