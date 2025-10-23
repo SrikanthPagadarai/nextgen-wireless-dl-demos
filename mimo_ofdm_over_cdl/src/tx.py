@@ -1,7 +1,5 @@
 import os
-if os.getenv("CUDA_VISIBLE_DEVICES") is None:
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "0"
 import tensorflow as tf
 from typing import Dict, Any, Optional
 from sionna.phy.mapping import BinarySource, Mapper

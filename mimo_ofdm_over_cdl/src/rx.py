@@ -30,7 +30,7 @@ class Rx:
                 if g is None:
                     raise ValueError("perfect_csi=True (downlink) requires Tx-provided 'g'.")
                 h_hat = g
-            err_var = 0.0
+            err_var = tf.cast(0.0, tf.float32)
         else:
             h_hat, err_var = self._ce(y, no)
 

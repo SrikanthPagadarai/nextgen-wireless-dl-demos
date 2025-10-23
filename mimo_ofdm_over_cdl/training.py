@@ -1,12 +1,16 @@
 import tensorflow as tf
 import pickle
 from src.system import System
+gpus = tf.config.list_physical_devices('GPU')
+for g in gpus:
+    tf.config.experimental.set_memory_growth(g, True)
+print("GPUs:", tf.config.list_logical_devices('GPU'))
 
 # Training config
-BATCH_SIZE = 64
+BATCH_SIZE = 32
 EBN0_DB_MIN = -3
 EBN0_DB_MAX = 5
-NUM_TRAINING_ITERATIONS = 50
+NUM_TRAINING_ITERATIONS = 100
 
 system = System(training=True, use_neural_rx=True, direction="uplink", perfect_csi=True)
 print(type(system), getattr(system, "__class__", None))
@@ -38,7 +42,8 @@ for i in range(NUM_TRAINING_ITERATIONS):
     optimizer.apply_gradients(grads_and_vars)
 
     # Progress
-    print(f"\rStep {i}/{NUM_TRAINING_ITERATIONS}  Loss: {float(loss.numpy()):.4f}", end='', flush=True)
+    loss_val = float(loss)  # still syncs once, but succinct
+    print(f"\rStep {i}/{NUM_TRAINING_ITERATIONS}  Loss: {loss_val:.4f}", end='', flush=True)
 print()
 print("\nTraining complete.")
 
