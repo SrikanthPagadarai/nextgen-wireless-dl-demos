@@ -46,7 +46,16 @@ RUN python -m pip install --upgrade --force-reinstall "${TF_PACKAGE}==${TF_VERSI
 ARG ENABLE_GPU
 RUN if [ "${ENABLE_GPU}" = "1" ]; then \
       set -e; \
-      CUDA_MM="$(python -c "import json;print('.'.join(json.load(open('/usr/local/cuda/version.json'))['cuda']['version'].split('.')[:2]))")"; \
+      CUDA_DIR="$(readlink -f /usr/local/cuda || true)"; \
+      CUDA_MM=""; \
+      if [ -f /usr/local/cuda/version.txt ]; then \
+        CUDA_MM="$(awk '{print $3}' /usr/local/cuda/version.txt | cut -d. -f1-2)"; \
+      fi; \
+      if [ -z "${CUDA_MM}" ] && [ -n "${CUDA_DIR}" ]; then \
+        CUDA_MM="$(basename "${CUDA_DIR}" | sed -n 's/^cuda-\([0-9]\+\.[0-9]\+\).*/\1/p')"; \
+      fi; \
+      if [ -z "${CUDA_MM}" ]; then echo "ERROR: Could not determine CUDA version"; exit 1; fi; \
+      echo "Detected CUDA ${CUDA_MM}"; \
       apt-get update; \
       if [ "${CUDA_MM}" = "12.2" ]; then \
         apt-get install -y --no-install-recommends cuda-nvcc-12-2; \
@@ -61,12 +70,16 @@ RUN if [ "${ENABLE_GPU}" = "1" ]; then \
 # (GPU only) Build-time sanity check: TF wheel CUDA == image CUDA
 ARG ENABLE_CUDA_CHECK
 RUN if [ "${ENABLE_GPU}" = "1" ] && [ "${ENABLE_CUDA_CHECK}" = "1" ]; then \
-      python -c "import json,sys,tensorflow as tf; \
-img=json.load(open('/usr/local/cuda/version.json'))['cuda']['version']; \
-img_mm='.'.join(img.split('.')[:2]); \
-tf_cuda=str(tf.sysconfig.get_build_info().get('cuda_version','')).strip(); \
-print(f'[CHECK] Image CUDA: {img_mm} | TF wheel CUDA: {tf_cuda}'); \
-sys.exit(0 if tf_cuda.startswith(img_mm) else 1)"; \
+      IMG_MM=""; \
+      if [ -f /usr/local/cuda/version.txt ]; then \
+        IMG_MM="$(awk '{print $3}' /usr/local/cuda/version.txt | cut -d. -f1-2)"; \
+      fi; \
+      if [ -z "${IMG_MM}" ]; then \
+        CUDA_DIR="$(readlink -f /usr/local/cuda || true)"; \
+        IMG_MM="$(basename "${CUDA_DIR}" | sed -n 's/^cuda-\([0-9]\+\.[0-9]\+\).*/\1/p')"; \
+      fi; \
+      if [ -z "${IMG_MM}" ]; then echo "ERROR: Could not determine image CUDA version"; exit 1; fi; \
+      python -c "import sys,tensorflow as tf; tf_cuda=str(tf.sysconfig.get_build_info().get('cuda_version','')).strip(); print(f'[CHECK] Image CUDA: ${IMG_MM} | TF wheel CUDA: {tf_cuda}'); sys.exit(0 if tf_cuda.startswith('${IMG_MM}') else 1)"; \
     fi
 
 # App code & entrypoint
