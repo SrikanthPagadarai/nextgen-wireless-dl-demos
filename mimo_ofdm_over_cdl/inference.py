@@ -21,7 +21,7 @@ with open('weights-ofdm-neuralrx', 'rb') as f:
     weights = pickle.load(f)
     eval_system.set_weights(weights)
 
-# ---- Minimal addition: scalar-friendly wrapper for PlotBER ----
+# ---- Minimal wrapper for PlotBER: fix kwarg name to 'ebno_db' ----
 @tf.function(
     reduce_retracing=True,
     input_signature=[
@@ -29,14 +29,15 @@ with open('weights-ofdm-neuralrx', 'rb') as f:
         tf.TensorSpec([], tf.float32),  # scalar ebno_db
     ],
 )
-def mc_fun(batch_size, ebno_db_scalar):
-    ebno_vec = tf.fill([batch_size], ebno_db_scalar)  # expand to shape (BATCH_SIZE,)
-    return eval_system(batch_size, ebno_vec)          # reuse vector-SNR path
+def mc_fun(batch_size, ebno_db):
+    ebno_vec = tf.fill([batch_size], ebno_db)  # expand to shape (BATCH_SIZE,)
+    return eval_system(batch_size, ebno_vec)   # reuse vector-SNR path
 
 # Compute and plot BER
 outdir = Path("sim/results")
 outdir.mkdir(parents=True, exist_ok=True)
 
+# Start a fresh figure so we know what we're saving
 plt.close("all")
 plt.figure(figsize=(6, 4))
 
