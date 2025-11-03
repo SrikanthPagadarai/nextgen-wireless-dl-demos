@@ -56,7 +56,7 @@ if __name__ == "__main__":
         max_mc_iter=1000,
         num_target_block_errors=1000,
         target_bler=1e-3,
-        ebno_db=np.arange(-5, 10, 2),
+        ebno_db=np.arange(-3, 7, 1),
     )
 
     directions: List[str] = ["uplink", "downlink"]
