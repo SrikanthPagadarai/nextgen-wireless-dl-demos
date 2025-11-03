@@ -63,15 +63,16 @@ for direction in ["uplink", "downlink"]:
         loss_history.append(loss_value)
         print(f"\r[{direction}] Step {i}/{NUM_TRAINING_ITERATIONS}  Loss: {loss_value:.4f}",
               end="", flush=True)
+    print(f"\n\nTraining complete for {direction}.")
 
     # Save separate loss history per direction
-    save_path = os.path.join("results", f"loss_history_{direction}.npy")
-    np.save(save_path, np.array(loss_history, dtype=np.float32))
-    print(f"\n\nTraining complete for {direction}. Saved loss history to {save_path}.")
+    loss_files_path = os.path.join("results", f"loss_{direction}.npy")
+    np.save(loss_files_path, np.array(loss_history, dtype=np.float32))
+    print(f"\nSaved loss history to {loss_files_path}.")
 
     # Save trained weights separately per direction
     weights = system.get_weights()
-    weights_path = f'mimo-ofdm-neuralrx-weights-{direction}'
-    with open(weights_path, 'wb') as f:
+    weights_files_path = os.path.join("results", f"mimo-ofdm-neuralrx-weights-{direction}")
+    with open(weights_files_path, 'wb') as f:
         pickle.dump(weights, f)
-    print(f"Saved weights to {weights_path}.")
+    print(f"\nSaved weights to {weights_files_path}.")

@@ -3,10 +3,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # Constants
-INFILE = os.path.join("results", "all_baseline_results_cdlC.npz")
+BASELINE_FILE = os.path.join("results", "all_baseline_results_cdlC.npz")
 
 # Load Data
-data = np.load(INFILE, allow_pickle=True)
+data = np.load(BASELINE_FILE, allow_pickle=True)
 ebno_db = data["ebno_db"]
 directions = data["directions"]
 perfect_csi = data["perfect_csi"]
