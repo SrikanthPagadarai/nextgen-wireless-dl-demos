@@ -6,11 +6,10 @@ from src.system import System
 from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 
 BATCH_SIZE = 32
 EBN0_DB_MIN = -3
-EBN0_DB_MAX = 5
+EBN0_DB_MAX = 7
 
 # Evaluation: instantiate fresh inference model, load weights, plot BER
 eval_system = System(training=False, use_neural_rx=True)
@@ -33,31 +32,17 @@ def mc_fun(batch_size, ebno_db):
     ebno_vec = tf.fill([batch_size], ebno_db)  # expand to shape (BATCH_SIZE,)
     return eval_system(batch_size, ebno_vec)   # reuse vector-SNR path
 
-# Compute and plot BER
-outdir = Path("sim/results")
+# Compute BER
+outdir = Path("results")
 outdir.mkdir(parents=True, exist_ok=True)
-
-# Start a fresh figure so we know what we're saving
-plt.close("all")
-plt.figure(figsize=(6, 4))
-
 ber_plots = sn.phy.utils.PlotBER("Advanced neural receiver")
-
-ber_plots.simulate(
+ber, bler = ber_plots.simulate(
     mc_fun,
-    ebno_dbs=np.linspace(EBN0_DB_MIN, EBN0_DB_MAX, 20),
+    ebno_dbs=np.linspace(EBN0_DB_MIN, EBN0_DB_MAX, 1),
     batch_size=BATCH_SIZE,
-    num_target_block_errors=100,
-    legend="Neural Receiver",
-    soft_estimates=True,
     max_mc_iter=2,
-    show_fig=True,
+    num_target_block_errors=100,
+    target_bler=1e-2,
+    soft_estimates=True,
+    show_fig=False,
 )
-
-# Make sure matplotlib renders before saving (Agg backend)
-plt.tight_layout()
-plt.draw()
-png_path = outdir / "ber_neural.png"
-plt.savefig(png_path, dpi=180)
-plt.close()
-print(f"Saved BER plot to: {png_path}")
