@@ -76,19 +76,18 @@ for direction in directions:
         return loss
     
     # Training loop for this direction
-    for i in range(start_iteration, target_iteration):  # MODIFIED: use target
-        for i in range(start_iteration, target_iteration):
-            ebno_db = rng.uniform(
-                shape=[BATCH_SIZE],
-                minval=EBN0_DB_MIN,
-                maxval=EBN0_DB_MAX,
-                dtype=tf.float32
-            )
+    for i in range(start_iteration, target_iteration):
+        ebno_db = rng.uniform(
+            shape=[BATCH_SIZE],
+            minval=EBN0_DB_MIN,
+            maxval=EBN0_DB_MAX,
+            dtype=tf.float32
+        )
         loss = train_step(tf.constant(BATCH_SIZE, tf.int32), ebno_db)
         loss_value = float(loss.numpy())
         loss_history.append(loss_value)
         print(f"\r[{direction}] Step {i}/{target_iteration}  Loss: {loss_value:.4f}",
-              end="", flush=True)
+            end="", flush=True)
     
     print(f"\n\nCompleted batch for {direction}.")
     
