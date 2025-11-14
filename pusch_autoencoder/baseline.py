@@ -12,13 +12,16 @@ _cfg = Config()
 
 # Import the symbols created in system.py
 from system import Model
-from cir import (
-    channel_model,   # created in cir.py
-    batch_size,      # created in cir.py (from _cfg.BATCH_SIZE)
-    num_ue,          # used for filename formatting
-    num_bs_ant,      # used for filename formatting
-    num_ue_ant       # used for filename formatting
-)
+from cir import build_channel_model  # <-- changed import
+
+# Use central configuration for system dimensions & batch size
+batch_size = _cfg.batch_size
+num_ue = _cfg.num_ue
+num_bs_ant = _cfg.num_bs_ant
+num_ue_ant = _cfg.num_ue_ant
+
+# Build channel model once (was previously imported from cir as a global)
+channel_model = build_channel_model()
 
 # Quick functional check (unchanged behavior)
 ebno_db = 10.

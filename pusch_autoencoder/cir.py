@@ -1,26 +1,23 @@
-import os # Configure which GPU
+import os
+import numpy as np
+import tensorflow as tf
+import sionna
+from sionna.phy.channel import CIRDataset
+from sionna.rt import (
+    load_scene, Camera, Transmitter, Receiver,
+    PlanarArray, PathSolver, RadioMapSolver
+)
+
+from config import Config
+from cir_generator import CIRGenerator
+
+# GPU / TF configuration (run once on import)
 if os.getenv("CUDA_VISIBLE_DEVICES") is None:
-    gpu_num = 0 # Use "" to use the CPU
+    gpu_num = 0
     os.environ["CUDA_VISIBLE_DEVICES"] = f"{gpu_num}"
+
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-# Import or install Sionna
-try:
-    import sionna.phy
-    import sionna.rt
-except ImportError as e:
-    import sys
-    if 'google.colab' in sys.modules:
-       # Install Sionna in Google Colab
-       print("Installing Sionna and restarting the runtime. Please run the cell again.")
-       os.system("pip install sionna")
-       os.kill(os.getpid(), 5)
-    else:
-       raise e
-
-# Configure the notebook to use only a single GPU and allocate only as much memory as needed
-# For more details, see https://www.tensorflow.org/guide/gpu
-import tensorflow as tf
 gpus = tf.config.list_physical_devices('GPU')
 if gpus:
     try:
@@ -28,233 +25,245 @@ if gpus:
     except RuntimeError as e:
         print(e)
 
-# Avoid warnings from TensorFlow
 tf.get_logger().setLevel('ERROR')
 
-import numpy as np
 
-# For link-level simulations
-from sionna.phy.channel import CIRDataset
-
-# Import Sionna RT components
-from sionna.rt import load_scene, Camera, Transmitter, Receiver, PlanarArray,\
-                      PathSolver, RadioMapSolver
-
-import os
-import matplotlib.pyplot as plt
-
-# ----------------------------
-# New: central configuration
-# ----------------------------
-from config import Config
-from cir_generator import CIRGenerator
+# Global configuration
 _cfg = Config()
 
-# system parameters (read from config to avoid functionality changes)
-subcarrier_spacing = _cfg.SUBCARRIER_SPACING
-num_time_steps = _cfg.NUM_TIME_STEPS
+# system parameters directly from config.py
+subcarrier_spacing = _cfg.subcarrier_spacing
+num_time_steps = _cfg.num_time_steps
+num_ue = _cfg.num_ue
+num_bs = _cfg.num_bs
+num_ue_ant = _cfg.num_ue_ant
+num_bs_ant = _cfg.num_bs_ant
+batch_size_cir = _cfg.batch_size_cir
 
-num_ue = _cfg.NUM_UE
-num_bs = _cfg.NUM_BS
-num_ue_ant = _cfg.NUM_UE_ANT
-num_bs_ant = _cfg.NUM_BS_ANT
+# solver parameters
+max_depth = _cfg.max_depth
+min_gain_db = _cfg.min_gain_db
+max_gain_db = _cfg.max_gain_db
+min_dist = _cfg.min_dist_m
+max_dist = _cfg.max_dist_m
 
-batch_size_cir = _cfg.BATCH_SIZE_CIR
+# radio map parameters
+rm_cell_size = _cfg.rm_cell_size
+rm_samples_per_tx = _cfg.rm_samples_per_tx
+rm_vmin_db = _cfg.rm_vmin_db
+rm_clip_at = _cfg.rm_clip_at
+rm_resolution = _cfg.rm_resolution
+rm_num_samples = _cfg.rm_num_samples
 
-# radio-map / solver knobs
-max_depth = _cfg.MAX_DEPTH
+target_num_cirs = _cfg.target_num_cirs
+batch_size = _cfg.batch_size   # for CIRDataset construction
 
-# sampling window
-min_gain_db = _cfg.MIN_GAIN_DB
-max_gain_db = _cfg.MAX_GAIN_DB
-min_dist = _cfg.MIN_DIST
-max_dist = _cfg.MAX_DIST
 
-no_preview = False # unchanged toggle
+def build_channel_model():
+    """Build and return a CIRDataset-based channel model.
 
-# load an integrated scene
-scene = load_scene(sionna.rt.scene.munich)
+    This function encapsulates the previous top-level logic in cir.py:
+    - load scene & configure arrays
+    - build radio map & sample UE positions
+    - trace paths and build CIRs (a, tau)
+    - wrap them using CIRGenerator and CIRDataset
 
-# bs has an antenna pattern from 3GPP 38.901
-scene.tx_array = PlanarArray(num_rows=1, 
-                             num_cols=num_bs_ant//2,
-                             vertical_spacing=0.5,
-                             horizontal_spacing=0.5,
-                             pattern="tr38901",
-                             polarization="cross")
-
-# instantiate tx (BS)
-tx = Transmitter(name="tx",position=[8.5,21,27],look_at=[45,90,1.5],display_radius=3.0)
-scene.add(tx)
-
-# create new camera
-camera = Camera(position=[0,80,500],orientation=np.array([0,np.pi/2,-np.pi/2]))
-
-# compute radio map for the instantiated tx (BS)
-rm_solver = RadioMapSolver() # radio-map solver
-rm = rm_solver(scene,
-               max_depth=max_depth,
-               cell_size=_cfg.RM_CELL_SIZE,
-               samples_per_tx=_cfg.RM_SAMPLES_PER_TX)
-
-scene.render_to_file(camera=camera,
-                     radio_map=rm,
-                     rm_vmin=_cfg.RM_VMIN_DB,
-                     clip_at=_cfg.RM_CLIP_AT,
-                     resolution=list(_cfg.RM_RESOLUTION),
-                     filename="munich_radio_map.png",
-                     num_samples=_cfg.RM_NUM_SAMPLES)
-
-# sample random user positions from radio map
-
-# sample batch-size random user positions from the radio-map
-ue_pos, _ = rm.sample_positions(num_pos=batch_size_cir,
-                                metric="path_gain",
-                                min_val_db=min_gain_db,
-                                max_val_db=max_gain_db,
-                                min_dist=min_dist,
-                                max_dist=max_dist)
-
-# add UEs at the sampled positions
-scene.rx_array = PlanarArray(num_rows=1, 
-                             num_cols=num_ue_ant//2,
-                             vertical_spacing=0.5,
-                             horizontal_spacing=0.5,
-                             pattern="iso",
-                             polarization="cross")
-
-# create batch_size receivers
-for i in range(batch_size_cir):
-    p = ue_pos[0, i, :]
-
-    if hasattr(p, "numpy"):
-        p = p.numpy()
-    p = np.asarray(p, dtype=np.float64).reshape(3,)
-    px, py, pz = float(p[0]), float(p[1]), float(p[2])
-
-    # remove any existing receiver with same name
-    try:
-        scene.remove(f"rx-{i}")
-    except Exception:
-        pass
-
-    rx = Receiver(
-        name=f"rx-{i}",
-        position=(px, py, pz),
-        velocity=(3.0, 3.0, 0.0),
-        display_radius=1.0,
-        color=(1, 0, 0),
-    )
-    scene.add(rx)
-
-scene.render_to_file(camera=camera,
-                     radio_map=rm,
-                     rm_vmin=_cfg.RM_VMIN_DB,
-                     clip_at=_cfg.RM_CLIP_AT,
-                     resolution=list(_cfg.RM_RESOLUTION),
-                     filename="munich_radio_map_with_UEs.png",
-                     num_samples=_cfg.RM_NUM_SAMPLES)
-
-# create CIR dataset
-target_num_cirs = _cfg.TARGET_NUM_CIRS  # unchanged value
-
-# channel impulse responses
-a_list, tau_list = [], []
-max_num_paths = 0
-p_solver = PathSolver()
-num_runs = int(np.ceil(target_num_cirs/batch_size_cir))
-for idx in range(num_runs):
-    print(f"Progress: {idx+1}/{num_runs}", end="\r", flush=True)
-
-    # sample random user positions from the radio-map
-    ue_pos, _ = rm.sample_positions(num_pos=batch_size_cir,
-                                    metric="path_gain",
-                                    min_val_db=min_gain_db,
-                                    max_val_db=max_gain_db,
-                                    min_dist=min_dist,
-                                    max_dist=max_dist,
-                                    seed=idx)
+    Returns
+    -------
+    channel_model : sionna.phy.channel.CIRDataset
+        Channel model ready to be passed into the System/Model.
+    """
     
-    # update all receiver positions
-    for rx in range(batch_size_cir):
-        p = ue_pos[0, rx, :]
+    # Load scene    
+    scene = load_scene(sionna.rt.scene.munich)
 
+    # base station array
+    scene.tx_array = PlanarArray(
+        num_rows=1,
+        num_cols=num_bs_ant // 2,
+        vertical_spacing=0.5,
+        horizontal_spacing=0.5,
+        pattern="tr38901",
+        polarization="cross"
+    )
+
+    # base station (transmitter)
+    tx = Transmitter(
+        name="tx",
+        position=[8.5, 21, 27],
+        look_at=[45, 90, 1.5],
+        display_radius=3.0
+    )
+    scene.add(tx)
+
+    camera = Camera(position=[0, 80, 500], orientation=np.array([0, np.pi/2, -np.pi/2]))
+    
+    # Compute radio map    
+    rm_solver = RadioMapSolver()
+    rm = rm_solver(
+        scene,
+        max_depth=max_depth,
+        cell_size=rm_cell_size,
+        samples_per_tx=rm_samples_per_tx
+    )
+
+    scene.render_to_file(
+        camera=camera,
+        radio_map=rm,
+        rm_vmin=rm_vmin_db,
+        clip_at=rm_clip_at,
+        resolution=list(rm_resolution),
+        filename="munich_radio_map.png",
+        num_samples=rm_num_samples
+    )
+    
+    # Sample initial UE positions    
+    ue_pos, _ = rm.sample_positions(
+        num_pos=batch_size_cir,
+        metric="path_gain",
+        min_val_db=min_gain_db,
+        max_val_db=max_gain_db,
+        min_dist=min_dist,
+        max_dist=max_dist
+    )
+
+    # UE arrays
+    scene.rx_array = PlanarArray(
+        num_rows=1,
+        num_cols=num_ue_ant // 2,
+        vertical_spacing=0.5,
+        horizontal_spacing=0.5,
+        pattern="iso",
+        polarization="cross"
+    )
+
+    # create receivers
+    for i in range(batch_size_cir):
+        p = ue_pos[0, i, :]
         if hasattr(p, "numpy"):
             p = p.numpy()
-        p = np.asarray(p, dtype=np.float64).reshape(3,)
-        px, py, pz = float(p[0]), float(p[1]), float(p[2])
+        p = np.asarray(p, dtype=np.float64)
 
-        scene.receivers[f"rx-{rx}"].position = (px, py, pz)
+        try:
+            scene.remove(f"rx-{i}")
+        except Exception:
+            pass
 
-    # simulate CIR
-    paths = p_solver(scene, max_depth=max_depth, max_num_paths_per_src=10000)
+        rx = Receiver(
+            name=f"rx-{i}",
+            position=(float(p[0]), float(p[1]), float(p[2])),
+            velocity=(3.0, 3.0, 0.0),
+            display_radius=1.0,
+            color=(1, 0, 0)
+        )
+        scene.add(rx)
 
-    # from paths to CIRs
-    a, tau = paths.cir(sampling_frequency=subcarrier_spacing, num_time_steps=14, out_type="numpy")
-    a = a.astype(np.complex64, copy=False)
-    tau = tau.astype(np.float32, copy=False)
-    a_list.append(a)
-    tau_list.append(tau)
+    scene.render_to_file(
+        camera=camera,
+        radio_map=rm,
+        rm_vmin=rm_vmin_db,
+        clip_at=rm_clip_at,
+        resolution=list(rm_resolution),
+        filename="munich_radio_map_with_UEs.png",
+        num_samples=rm_num_samples
+    )
 
-    # update max number of paths over all batches of CIRs
-    num_paths = a.shape[-2]
-    if num_paths > max_num_paths:
-        max_num_paths = num_paths
+    
+    # CIR generation    
+    p_solver = PathSolver()
+    a_list, tau_list = [], []
+    max_num_paths = 0
+    num_runs = int(np.ceil(target_num_cirs / batch_size_cir))
 
-# concatenate all CIRs into a single tensor
-a, tau = [], []
-printed = False
-for a_, tau_ in zip(a_list, tau_list):
-    if not printed:
-        print("a_ shape:", a_.shape)
-        print("tau_ shape:", tau_.shape)
-        printed = True
-    num_paths = a_.shape[-2]
-    a.append(np.pad(a_, [[0,0],[0,0],[0,0],[0,0],[0,max_num_paths-num_paths],[0,0]],
-                constant_values=0).astype(np.complex64, copy=False))
-    tau.append(np.pad(tau_, [[0,0],[0,0],[0,max_num_paths-num_paths]],
-                  constant_values=0).astype(np.float32, copy=False))
-a = np.concatenate(a, axis=0) # Concatenate along the num_rx dimension
-tau = np.concatenate(tau, axis=0)
-print('1)')
-print('a.shape: ', a.shape)
-print('tau.shape: ', tau.shape)
+    for idx in range(num_runs):
+        print(f"Progress: {idx+1}/{num_runs}", end="\r", flush=True)
 
-# reverse direction
-a = np.transpose(a, (2,3,0,1,4,5))
-tau = np.transpose(tau, (1,0,2))
-print('2)')
-print('a.shape: ', a.shape)
-print('tau.shape: ', tau.shape)
+        ue_pos, _ = rm.sample_positions(
+            num_pos=batch_size_cir,
+            metric="path_gain",
+            min_val_db=min_gain_db,
+            max_val_db=max_gain_db,
+            min_dist=min_dist,
+            max_dist=max_dist,
+            seed=idx
+        )
 
-# add a batch-size dimension
-a = np.expand_dims(a, axis=0)
-tau = np.expand_dims(tau, axis=0)
-print('3)')
-print('a.shape: ', a.shape)
-print('tau.shape: ', tau.shape)
+        for rx in range(batch_size_cir):
+            p = ue_pos[0, rx, :]
+            if hasattr(p, "numpy"):
+                p = p.numpy()
+            p = np.asarray(p, dtype=np.float64)
+            scene.receivers[f"rx-{rx}"].position = (float(p[0]), float(p[1]), float(p[2]))
 
-# switch batch-size and num_gggggggg dimensions
-a = np.transpose(a,[3,1,2,0,4,5,6])
-tau = np.transpose(tau,[2,1,0,3])
-print('4)')
-print('a.shape: ', a.shape)
-print('tau.shape: ', tau.shape)
+        paths = p_solver(
+            scene,
+            max_depth=max_depth,
+            max_num_paths_per_src=10000
+        )
+        a, tau = paths.cir(
+            sampling_frequency=subcarrier_spacing,
+            num_time_steps=num_time_steps,
+            out_type="numpy"
+        )
+        a = a.astype(np.complex64)
+        tau = tau.astype(np.float32)
+        a_list.append(a)
+        tau_list.append(tau)
 
-# remove CIRs that have no active link (i.e., a is all-zero)
-p_link = np.sum(np.abs(a)**2, axis=(1,2,3,4,5,6))
-a = a[p_link>0,...]
-tau = tau[p_link>0,...]
+        num_paths = a.shape[-2]
+        max_num_paths = max(max_num_paths, num_paths)
+    
+    # Padding + stacking    
+    a, tau = [], []
+    for a_, tau_ in zip(a_list, tau_list):
+        num_paths = a_.shape[-2]
+        a.append(
+            np.pad(
+                a_,
+                [[0, 0], [0, 0], [0, 0], [0, 0],
+                 [0, max_num_paths - num_paths], [0, 0]],
+                constant_values=0
+            ).astype(np.complex64)
+        )
 
-print('5)')
-print('a.shape: ', a.shape)
-print('tau.shape: ', tau.shape)
+        tau.append(
+            np.pad(
+                tau_,
+                [[0, 0], [0, 0],
+                 [0, max_num_paths - num_paths]],
+                constant_values=0
+            ).astype(np.float32)
+        )
 
-batch_size = _cfg.BATCH_SIZE  # Must equal CIRDataset batch size for BER sims
+    a = np.concatenate(a, axis=0)
+    tau = np.concatenate(tau, axis=0)
+    
+    # Reorder dimensions    
+    a = np.transpose(a, (2, 3, 0, 1, 4, 5))
+    tau = np.transpose(tau, (1, 0, 2))
 
-# Init CIR generator
-cir_generator = CIRGenerator(a, tau, num_ue)
-# Initialises a channel model that can be directly used by OFDMChannel layer
-channel_model = CIRDataset(cir_generator, batch_size, num_bs, num_bs_ant,
-                           num_ue, num_ue_ant, max_num_paths, num_time_steps)
+    a = np.expand_dims(a, axis=0)
+    tau = np.expand_dims(tau, axis=0)
 
+    a = np.transpose(a, [3, 1, 2, 0, 4, 5, 6])
+    tau = np.transpose(tau, [2, 1, 0, 3])
+    
+    # Remove empty CIRs    
+    p_link = np.sum(np.abs(a) ** 2, axis=(1, 2, 3, 4, 5, 6))
+    a = a[p_link > 0, ...]
+    tau = tau[p_link > 0, ...]
+    
+    # CIRDataset construction    
+    cir_generator = CIRGenerator(a, tau, num_ue)
+    channel_model = CIRDataset(
+        cir_generator,
+        batch_size,
+        num_bs,
+        num_bs_ant,
+        num_ue,
+        num_ue_ant,
+        max_num_paths,
+        num_time_steps
+    )
+
+    return channel_model
