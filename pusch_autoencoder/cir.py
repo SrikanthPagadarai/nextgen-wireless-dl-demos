@@ -60,13 +60,7 @@ batch_size = _cfg.batch_size   # for CIRDataset construction
 
 
 def build_channel_model():
-    """Build and return a CIRDataset-based channel model.
-
-    This function encapsulates the previous top-level logic in cir.py:
-    - load scene & configure arrays
-    - build radio map & sample UE positions
-    - trace paths and build CIRs (a, tau)
-    - wrap them using CIRGenerator and CIRDataset
+    """Build channel model.
 
     Returns
     -------
@@ -167,103 +161,156 @@ def build_channel_model():
         filename="munich_radio_map_with_UEs.png",
         num_samples=rm_num_samples
     )
+    num_files = 2  # Generate 25 files
 
+    # Create directory for TFRecord files
+    tfrecord_dir = "cir_tfrecords"
+    os.makedirs(tfrecord_dir, exist_ok=True)
+
+    def _bytes_feature(value):
+        """Returns a bytes_list from a string / byte."""
+        if isinstance(value, type(tf.constant(0))):
+            value = value.numpy()
+        return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
     
-    # CIR generation    
-    p_solver = PathSolver()
-    a_list, tau_list = [], []
-    max_num_paths = 0
-    num_runs = int(np.ceil(target_num_cirs / batch_size_cir))
+    def _int64_list_feature(value):
+        """Returns an int64_list from a list or np.array of ints."""
+        return tf.train.Feature(int64_list=tf.train.Int64List(value=list(value)))
 
-    for idx in range(num_runs):
-        print(f"Progress: {idx+1}/{num_runs}", end="\r", flush=True)
+    # Generate and save 25 files
+    for file_idx in range(num_files):
+        print(f"\nGenerating file {file_idx+1}/{num_files}")
 
-        ue_pos, _ = rm.sample_positions(
-            num_pos=batch_size_cir,
-            metric="path_gain",
-            min_val_db=min_gain_db,
-            max_val_db=max_gain_db,
-            min_dist=min_dist,
-            max_dist=max_dist,
-            seed=idx
-        )
+        # CIR generation    
+        p_solver = PathSolver()
+        a_list, tau_list = [], []
+        max_num_paths = 0
+        num_runs = int(np.ceil(target_num_cirs / batch_size_cir))
 
-        for rx in range(batch_size_cir):
-            p = ue_pos[0, rx, :]
-            if hasattr(p, "numpy"):
-                p = p.numpy()
-            p = np.asarray(p, dtype=np.float64)
-            scene.receivers[f"rx-{rx}"].position = (float(p[0]), float(p[1]), float(p[2]))
+        for idx in range(num_runs):
+            print(f"Progress: {idx+1}/{num_runs}", end="\r", flush=True)
 
-        paths = p_solver(
-            scene,
-            max_depth=max_depth,
-            max_num_paths_per_src=10000
-        )
-        a, tau = paths.cir(
-            sampling_frequency=subcarrier_spacing,
-            num_time_steps=num_time_steps,
-            out_type="numpy"
-        )
-        a = a.astype(np.complex64)
-        tau = tau.astype(np.float32)
-        a_list.append(a)
-        tau_list.append(tau)
+            ue_pos, _ = rm.sample_positions(
+                num_pos=batch_size_cir,
+                metric="path_gain",
+                min_val_db=min_gain_db,
+                max_val_db=max_gain_db,
+                min_dist=min_dist,
+                max_dist=max_dist,
+                seed=idx
+            )
 
-        num_paths = a.shape[-2]
-        max_num_paths = max(max_num_paths, num_paths)
-    
-    # Padding + stacking    
-    a, tau = [], []
-    for a_, tau_ in zip(a_list, tau_list):
-        num_paths = a_.shape[-2]
-        a.append(
-            np.pad(
-                a_,
-                [[0, 0], [0, 0], [0, 0], [0, 0],
-                 [0, max_num_paths - num_paths], [0, 0]],
-                constant_values=0
-            ).astype(np.complex64)
-        )
+            for rx in range(batch_size_cir):
+                p = ue_pos[0, rx, :]
+                if hasattr(p, "numpy"):
+                    p = p.numpy()
+                p = np.asarray(p, dtype=np.float64)
+                scene.receivers[f"rx-{rx}"].position = (float(p[0]), float(p[1]), float(p[2]))
 
-        tau.append(
-            np.pad(
-                tau_,
-                [[0, 0], [0, 0],
-                 [0, max_num_paths - num_paths]],
-                constant_values=0
-            ).astype(np.float32)
-        )
+            paths = p_solver(
+                scene,
+                max_depth=max_depth,
+                max_num_paths_per_src=10000
+            )
+            a, tau = paths.cir(
+                sampling_frequency=subcarrier_spacing,
+                num_time_steps=num_time_steps,
+                out_type="numpy"
+            )
+            a = a.astype(np.complex64)
+            tau = tau.astype(np.float32)
+            a_list.append(a)
+            tau_list.append(tau)
 
-    a = np.concatenate(a, axis=0)
-    tau = np.concatenate(tau, axis=0)
-    
-    # Reorder dimensions    
-    a = np.transpose(a, (2, 3, 0, 1, 4, 5))
-    tau = np.transpose(tau, (1, 0, 2))
+            num_paths = a.shape[-2]
+            max_num_paths = max(max_num_paths, num_paths)
+        
+        # Padding + stacking    
+        a, tau = [], []
+        for a_, tau_ in zip(a_list, tau_list):
+            num_paths = a_.shape[-2]
+            a.append(
+                np.pad(
+                    a_,
+                    [[0, 0], [0, 0], [0, 0], [0, 0],
+                    [0, max_num_paths - num_paths], [0, 0]],
+                    constant_values=0
+                ).astype(np.complex64)
+            )
 
-    a = np.expand_dims(a, axis=0)
-    tau = np.expand_dims(tau, axis=0)
+            tau.append(
+                np.pad(
+                    tau_,
+                    [[0, 0], [0, 0],
+                    [0, max_num_paths - num_paths]],
+                    constant_values=0
+                ).astype(np.float32)
+            )
 
-    a = np.transpose(a, [3, 1, 2, 0, 4, 5, 6])
-    tau = np.transpose(tau, [2, 1, 0, 3])
-    
-    # Remove empty CIRs    
-    p_link = np.sum(np.abs(a) ** 2, axis=(1, 2, 3, 4, 5, 6))
-    a = a[p_link > 0, ...]
-    tau = tau[p_link > 0, ...]
-    
-    # CIRDataset construction    
-    cir_generator = CIRGenerator(a, tau, num_ue)
-    channel_model = CIRDataset(
-        cir_generator,
-        batch_size,
-        num_bs,
-        num_bs_ant,
-        num_ue,
-        num_ue_ant,
-        max_num_paths,
-        num_time_steps
-    )
+        a = np.concatenate(a, axis=0)
+        tau = np.concatenate(tau, axis=0)
+        
+        # Reorder dimensions    
+        a = np.transpose(a, (2, 3, 0, 1, 4, 5))
+        tau = np.transpose(tau, (1, 0, 2))
 
-    return channel_model
+        a = np.expand_dims(a, axis=0)
+        tau = np.expand_dims(tau, axis=0)
+
+        a = np.transpose(a, [3, 1, 2, 0, 4, 5, 6])
+        tau = np.transpose(tau, [2, 1, 0, 3])
+        
+        # Remove empty CIRs    
+        p_link = np.sum(np.abs(a) ** 2, axis=(1, 2, 3, 4, 5, 6))
+        a = a[p_link > 0, ...]
+        tau = tau[p_link > 0, ...]
+        print("(in cir.py) a.shape: ", a.shape)
+        print("(in cir.py) tau.shape: ", tau.shape)
+
+        print(f"\n  File {file_idx+1}: a.shape={a.shape}, tau.shape={tau.shape}")
+
+        # Write to TFRecord file
+        filename = os.path.join(tfrecord_dir, f"cir_{file_idx:03d}.tfrecord")
+        with tf.io.TFRecordWriter(filename) as writer:
+            for i in range(len(a)):
+                # Per-sample tensors
+                a_sample = a[i]          # e.g., (1, 16, 1, 4, 13, 14)
+                tau_sample = tau[i]      # e.g., (1, 1, 13)
+
+                # Serialize tensors
+                a_bytes = tf.io.serialize_tensor(a_sample).numpy()
+                tau_bytes = tf.io.serialize_tensor(tau_sample).numpy()
+
+                # Shape metadata (per sample)
+                a_shape = a_sample.shape
+                tau_shape = tau_sample.shape
+
+                # Create feature dictionary with data + shape metadata
+                feature = {
+                    "a": _bytes_feature(a_bytes),
+                    "tau": _bytes_feature(tau_bytes),
+                    "a_shape": _int64_list_feature(a_shape),
+                    "tau_shape": _int64_list_feature(tau_shape),
+                }
+
+                # Create Example message
+                features = tf.train.Features(feature=feature)
+                example = tf.train.Example(features=features)
+
+                # Write to file
+                writer.write(example.SerializeToString())
+
+        
+        print(f"  Saved {len(a)} samples to {filename}")
+        print(f"  Max. number of paths: {max_num_paths}")
+    print(f"\nSuccessfully generated and saved {num_files} TFRecord files in '{tfrecord_dir}/' directory")
+
+if __name__ == "__main__":
+    print("\n CIR Generation Started")
+    try:
+        build_channel_model()
+        print("\n CIR Generation Completed Successfully \n")
+    except Exception as e:
+        print("\n!!! CIR Generation Failed !!!")
+        print(f"Error: {e}\n")
+        raise

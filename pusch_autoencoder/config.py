@@ -15,9 +15,7 @@ class Config:
     Central configuration for the PUSCH RT demo.
     """
 
-    # -------------------------------
     # Hard-coded system parameters
-    # -------------------------------
     _subcarrier_spacing: float = field(init=False, default=30e3, repr=False)   # Hz
     _num_time_steps: int = field(init=False, default=14, repr=False)           # OFDM symbols per slot
 
@@ -36,7 +34,7 @@ class Config:
     _min_dist_m: float = field(init=False, default=5.0, repr=False)            # sampling annulus: inner radius
     _max_dist_m: float = field(init=False, default=400.0, repr=False)          # sampling annulus: outer radius
 
-    # Radio map rendering (purely for visualization; values unchanged)
+    # Radio map rendering
     _rm_cell_size: Tuple[float, float] = field(init=False, default=(1.0, 1.0), repr=False)
     _rm_samples_per_tx: int = field(init=False, default=10000, repr=False)
     _rm_vmin_db: float = field(init=False, default=-110.0, repr=False)
@@ -47,14 +45,10 @@ class Config:
     # BER/BLER simulation
     _batch_size: int = field(init=False, default=20, repr=False)               # must match CIRDataset batch size
 
-    # Internal seed (kept for parity with ref style)
+    # Internal seed
     _seed: int = field(init=False, default=42, repr=False)
 
-    # ---------------
-    # Read-only props
-    # ---------------
-
-    # Lowercase get-methods (config_nrx-style)
+    # get-methods
     @property
     def subcarrier_spacing(self) -> float:
         return self._subcarrier_spacing

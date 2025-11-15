@@ -1,4 +1,3 @@
-# Minimal, strictly-necessary imports for the Model definition
 import numpy as np
 import tensorflow as tf
 
@@ -11,11 +10,8 @@ from sionna.phy.mimo import StreamManagement
 from config import Config
 
 
-class Model:
-    def __init__(self,
-                 channel_model,
-                 perfect_csi,  # bool
-                 ):
+class PUSCHLinkE2E:
+    def __init__(self, channel_model, perfect_csi):
         super().__init__()
 
         self._channel_model = channel_model
@@ -31,7 +27,7 @@ class Model:
         self._mcs_table = 1
         self._domain = "freq"
 
-        # Below parameters must equal the Path2CIR parameters and come from Config
+        # from Config
         self._num_ue_ant = self._cfg.num_ue_ant
         self._num_ue = self._cfg.num_ue
         self._subcarrier_spacing = self._cfg.subcarrier_spacing  # must be the same as used for Path2CIR
@@ -110,6 +106,7 @@ class Model:
             self._pusch_transmitter.resource_grid,
         )
         y, h = self._channel(x, no)
+
         if self._perfect_csi:
             b_hat = self._pusch_receiver(y, no, h)
         else:

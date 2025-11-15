@@ -1,31 +1,96 @@
-# Minimal, strictly-necessary imports so this file runs on its own
 import os
 import numpy as np
 import matplotlib.pyplot as plt
 import tensorflow as tf
-
 from sionna.phy.utils import PlotBER
+from sionna.phy.channel import CIRDataset
+from cir_generator import CIRGenerator
 
-# Read-only parameters for plotting/title, etc.
 from config import Config
+from system import PUSCHLinkE2E
+from cir import build_channel_model
+
 _cfg = Config()
-
-# Import the symbols created in system.py
-from system import Model
-from cir import build_channel_model  # <-- changed import
-
-# Use central configuration for system dimensions & batch size
 batch_size = _cfg.batch_size
+num_bs = _cfg.num_bs
 num_ue = _cfg.num_ue
 num_bs_ant = _cfg.num_bs_ant
 num_ue_ant = _cfg.num_ue_ant
+num_time_steps = _cfg.num_time_steps
 
-# Build channel model once (was previously imported from cir as a global)
-channel_model = build_channel_model()
+# Build channel model
+# channel_model = build_channel_model()
 
-# Quick functional check (unchanged behavior)
+# CIRDataset construction
+# Load all CIRs ('a' and 'tau') from TFRecord files into tensors
+cir_dir = os.path.join(os.path.dirname(__file__), "cir_tfrecords")
+cir_files = tf.io.gfile.glob(os.path.join(cir_dir, "*.tfrecord"))
+
+if not cir_files:
+    raise ValueError(f"No TFRecord files found in {cir_dir}")
+
+# Assumes that 'a' and 'tau' were written using tf.io.serialize_tensor
+# and that 'a' is complex64 and 'tau' is float32.
+feature_description = {
+    "a": tf.io.FixedLenFeature([], tf.string),
+    "tau": tf.io.FixedLenFeature([], tf.string),
+    "a_shape": tf.io.VarLenFeature(tf.int64),
+    "tau_shape": tf.io.VarLenFeature(tf.int64),
+}
+
+def _parse_example(example_proto):
+    parsed = tf.io.parse_single_example(example_proto, feature_description)
+
+    # Deserialize tensors
+    a = tf.io.parse_tensor(parsed["a"], out_type=tf.complex64)
+    tau = tf.io.parse_tensor(parsed["tau"], out_type=tf.float32)
+
+    # Read shape metadata (sparse -> dense)
+    a_shape = tf.sparse.to_dense(parsed["a_shape"])
+    tau_shape = tf.sparse.to_dense(parsed["tau_shape"])
+
+    # Ensure correct shapes (mirroring cir.py)
+    a = tf.reshape(a, a_shape)
+    tau = tf.reshape(tau, tau_shape)
+
+    return a, tau
+
+
+ds = tf.data.TFRecordDataset(cir_files)
+ds = ds.map(_parse_example)
+
+all_a = []
+all_tau = []
+for a, tau in ds:
+    # Each record is expected to have shapes like:
+    # a:  (N_i, 1, 16, 1, 4, 13, 14)
+    # tau:(N_i, 1, 1, 13)
+    all_a.append(a)
+    all_tau.append(tau)
+
+all_a = tf.concat(all_a, axis=0)
+all_tau = tf.concat(all_tau, axis=0)
+all_a = tf.expand_dims(all_a, axis=1)
+all_tau = tf.expand_dims(all_tau, axis=1)
+print("(in init) all_a.shape: ", all_a.shape)
+print("(in init) all_tau.shape: ", all_tau.shape)
+
+cir_generator = CIRGenerator(all_a, all_tau, num_ue)
+channel_model = CIRDataset(
+    cir_generator,
+    batch_size,
+    num_bs,
+    num_bs_ant,
+    num_ue,
+    num_ue_ant,
+    13,
+    num_time_steps
+)
+
+# Quick functional check
 ebno_db = 10.
-e2e_model = Model(channel_model, perfect_csi=False)
+e2e_model = PUSCHLinkE2E(channel_model, perfect_csi=False)
+# e2e_model = PUSCHLinkE2E(perfect_csi=False)
 
 # We can draw samples from the end-2-end link-level simulations
 b, b_hat = e2e_model(batch_size, ebno_db)
@@ -33,14 +98,14 @@ b, b_hat = e2e_model(batch_size, ebno_db)
 # SNR sweep
 ebno_db = np.arange(-3, 18, 2)
 
-# Build the BER/BLER simulator (plotting helper)
+# create the BER/BLER simulator
 ber_plot = PlotBER("Site-Specific MU-MIMO 5G NR PUSCH")
 
-# Collect results in the order: [Perf. CSI, Imperf. CSI]
+# compute BER/BLER results
 ber_list, bler_list = [], []
 for perf_csi in [True, False]:
-    # Model uses LMMSE internally
-    e2e_model = Model(channel_model, perfect_csi=perf_csi)
+    e2e_model = PUSCHLinkE2E(channel_model, perfect_csi=perf_csi)
+    # e2e_model = PUSCHLinkE2E(perfect_csi=perf_csi)
 
     ber_i, bler_i = ber_plot.simulate(
         e2e_model,

@@ -1,12 +1,7 @@
 import tensorflow as tf
 
 class CIRGenerator:
-    """(Unchanged)"""
-
-    def __init__(self,
-                 a,
-                 tau,
-                 num_tx):
+    def __init__(self, a, tau, num_tx):
 
         # Copy to tensorflow
         self._a = tf.constant(a, tf.complex64)
