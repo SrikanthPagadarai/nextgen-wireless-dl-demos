@@ -20,12 +20,12 @@ class PUSCHLinkE2E:
         # Central config (all hard-coded system parameters live in Config)
         self._cfg = Config()
 
-        # System configuration (PUSCH-specific)
-        self._num_prb = 16
-        self._mcs_index = 14
-        self._num_layers = 1
-        self._mcs_table = 1
-        self._domain = "freq"
+        # System configuration from Config
+        self._num_prb = self._cfg.num_prb
+        self._mcs_index = self._cfg.mcs_index
+        self._num_layers = self._cfg.num_layers
+        self._mcs_table = self._cfg.mcs_table
+        self._domain = self._cfg.domain
 
         # from Config
         self._num_ue_ant = self._cfg.num_ue_ant

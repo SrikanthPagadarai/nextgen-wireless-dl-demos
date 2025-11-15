@@ -1,13 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Tuple
 from enum import IntEnum
-import numpy as np
-
-
-class AntennaPattern(IntEnum):
-    ISO = 0
-    TR38901 = 1
-
 
 @dataclass
 class Config:
@@ -47,6 +40,13 @@ class Config:
 
     # Internal seed
     _seed: int = field(init=False, default=42, repr=False)
+
+    # PUSCH-specific parameters
+    _num_prb: int = field(init=False, default=16, repr=False)              # Number of physical resource blocks
+    _mcs_index: int = field(init=False, default=14, repr=False)            # Modulation and coding scheme index
+    _num_layers: int = field(init=False, default=1, repr=False)            # Number of MIMO layers
+    _mcs_table: int = field(init=False, default=1, repr=False)             # MCS table selection
+    _domain: str = field(init=False, default="freq", repr=False)           # Processing domain
 
     # get-methods
     @property
@@ -133,83 +133,22 @@ class Config:
     def seed(self) -> int:
         return self._seed
 
-    # Convenience aliases (mirroring existing uppercase accessors)
     @property
-    def SUBCARRIER_SPACING(self) -> float:
-        return self.subcarrier_spacing
+    def num_prb(self) -> int:
+        return self._num_prb
 
     @property
-    def NUM_TIME_STEPS(self) -> int:
-        return self.num_time_steps
+    def mcs_index(self) -> int:
+        return self._mcs_index
 
     @property
-    def NUM_UE(self) -> int:
-        return self.num_ue
+    def num_layers(self) -> int:
+        return self._num_layers
 
     @property
-    def NUM_BS(self) -> int:
-        return self.num_bs
+    def mcs_table(self) -> int:
+        return self._mcs_table
 
     @property
-    def NUM_UE_ANT(self) -> int:
-        return self.num_ue_ant
-
-    @property
-    def NUM_BS_ANT(self) -> int:
-        return self.num_bs_ant
-
-    @property
-    def BATCH_SIZE_CIR(self) -> int:
-        return self.batch_size_cir
-
-    @property
-    def TARGET_NUM_CIRS(self) -> int:
-        return self.target_num_cirs
-
-    @property
-    def MAX_DEPTH(self) -> int:
-        return self.max_depth
-
-    @property
-    def MIN_GAIN_DB(self) -> float:
-        return self.min_gain_db
-
-    @property
-    def MAX_GAIN_DB(self) -> float:
-        return self.max_gain_db
-
-    @property
-    def MIN_DIST(self) -> float:
-        return self.min_dist_m
-
-    @property
-    def MAX_DIST(self) -> float:
-        return self.max_dist_m
-
-    @property
-    def RM_CELL_SIZE(self) -> Tuple[float, float]:
-        return self.rm_cell_size
-
-    @property
-    def RM_SAMPLES_PER_TX(self) -> int:
-        return self.rm_samples_per_tx
-
-    @property
-    def RM_VMIN_DB(self) -> float:
-        return self.rm_vmin_db
-
-    @property
-    def RM_CLIP_AT(self) -> float:
-        return self.rm_clip_at
-
-    @property
-    def RM_RESOLUTION(self) -> Tuple[int, int]:
-        return self.rm_resolution
-
-    @property
-    def RM_NUM_SAMPLES(self) -> int:
-        return self.rm_num_samples
-
-    @property
-    def BATCH_SIZE(self) -> int:
-        return self.batch_size
+    def domain(self) -> str:
+        return self._domain
