@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Tuple
-from enum import IntEnum
+import tensorflow as tf
+from sionna.phy.nr.utils import MCSDecoderNR
 
 @dataclass
 class Config:
@@ -19,6 +20,8 @@ class Config:
 
     _batch_size_cir: int = field(init=False, default=40, repr=False)          # batch for CIR generation
     _target_num_cirs: int = field(init=False, default=80, repr=False)         # total CIRs to generate
+
+    _resource_grid: object = field(init=False, default=None, repr=False)
 
     # Path solver / radio map
     _max_depth: int = field(init=False, default=5, repr=False)                 # max reflections
@@ -47,6 +50,28 @@ class Config:
     _num_layers: int = field(init=False, default=1, repr=False)            # Number of MIMO layers
     _mcs_table: int = field(init=False, default=1, repr=False)             # MCS table selection
     _domain: str = field(init=False, default="freq", repr=False)           # Processing domain
+    _num_bits_per_symbol: int = field(init=False, repr=False)
+    _target_coderate: float = field(init=False, repr=False)
+
+    def __post_init__(self):
+        mcs_decoder = MCSDecoderNR()
+
+        mcs_index = tf.constant(self._mcs_index, dtype=tf.int32)
+        mcs_table_index = tf.constant(self._mcs_table, dtype=tf.int32)
+        mcs_category = tf.constant(0, dtype=tf.int32)
+
+        modulation_order, target_coderate = mcs_decoder(
+            mcs_index,
+            mcs_table_index,
+            mcs_category,
+            check_index_validity=True,
+            transform_precoding=True,
+            pi2bpsk=False,
+        )
+
+        # Convert to Python scalars
+        self._num_bits_per_symbol = int(modulation_order.numpy())
+        self._target_coderate = float(target_coderate.numpy())
 
     # get-methods
     @property
@@ -152,3 +177,20 @@ class Config:
     @property
     def domain(self) -> str:
         return self._domain
+    
+    @property
+    def num_bits_per_symbol(self) -> float:
+        return self._num_bits_per_symbol
+    
+    @property
+    def target_coderate(self) -> float:
+        return self._target_coderate
+    
+    @property
+    def resource_grid(self):
+        return self._resource_grid
+
+    # set methods
+    @resource_grid.setter
+    def resource_grid(self, rg):
+        self._resource_grid = rg
