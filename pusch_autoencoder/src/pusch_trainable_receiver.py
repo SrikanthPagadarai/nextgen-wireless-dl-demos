@@ -5,8 +5,7 @@ from sionna.phy.nr import PUSCHReceiver
 class PUSCHTrainableReceiver(PUSCHReceiver):
     """
     Minor variant of PUSCHReceiver that returns LLRs after the LayerDemapper
-    and *before* TB decoding. This lets us define an autoencoder-style
-    loss on the bit LLRs.
+    and *before* TB decoding.
     """   
     def call(self, y, no, h=None):
         ### copy of PUSCHReceiver.call up to the TBDecoder

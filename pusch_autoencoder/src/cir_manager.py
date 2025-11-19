@@ -8,8 +8,8 @@ from sionna.rt import (
     PlanarArray, PathSolver, RadioMapSolver
 )
 
-from config import Config
-from cir_generator import CIRGenerator
+from .config import Config
+from .cir_generator import CIRGenerator
 
 # ============================================================================
 # TensorFlow and GPU Configuration
@@ -352,7 +352,7 @@ class CIRManager:
         
         print(f"  Saved {len(a)} samples to {filename}")
     
-    def load_from_tfrecord(self, tfrecord_dir="cir_tfrecords"):
+    def load_from_tfrecord(self, tfrecord_dir="../cir_tfrecords"):
         """Load CIR data from TFRecord files.
         
         Args:
@@ -410,7 +410,7 @@ class CIRManager:
     
     def build_channel_model(self, batch_size=None, num_bs=None, num_bs_ant=None, 
                            num_ue=None, num_ue_ant=None, num_time_steps=None,
-                           tfrecord_dir="cir_tfrecords"):
+                           tfrecord_dir="../cir_tfrecords"):
         """Build channel model from TFRecord files.
         
         Args:
@@ -454,7 +454,7 @@ class CIRManager:
         
         return channel_model
     
-    def generate_and_save(self, num_files=2, tfrecord_dir="cir_tfrecords", save_radio_map=True):
+    def generate_and_save(self, num_files=2, tfrecord_dir="../cir_tfrecords", save_radio_map=True):
         """Generate and save CIR data to TFRecord files.
         
         Main orchestration method that replaces the gen_cir() function.

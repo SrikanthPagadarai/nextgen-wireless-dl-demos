@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Tuple
+from typing import List
 import tensorflow as tf
 from sionna.phy.nr.utils import MCSDecoderNR
 
@@ -22,6 +23,7 @@ class Config:
     _target_num_cirs: int = field(init=False, default=80, repr=False)         # total CIRs to generate
 
     _resource_grid: object = field(init=False, default=None, repr=False)
+    _pilot_indices: List[int] = field(init=False, repr=False)
 
     # Path solver / radio map
     _max_depth: int = field(init=False, default=5, repr=False)                 # max reflections
@@ -72,6 +74,8 @@ class Config:
         # Convert to Python scalars
         self._num_bits_per_symbol = int(modulation_order.numpy())
         self._target_coderate = float(target_coderate.numpy())
+
+        self._pilot_indices = [0, 0]
 
     # get-methods
     @property
@@ -190,7 +194,16 @@ class Config:
     def resource_grid(self):
         return self._resource_grid
 
+    @property
+    def pilot_indices(self):
+        return self._pilot_indices
+
     # set methods
     @resource_grid.setter
     def resource_grid(self, rg):
         self._resource_grid = rg
+
+    # set methods
+    @pilot_indices.setter
+    def pilot_indices(self, pilot_indices):
+        self._pilot_indices = pilot_indices

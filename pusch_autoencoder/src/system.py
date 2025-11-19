@@ -65,6 +65,7 @@ class PUSCHLinkE2E:
                                    if self._use_autoencoder 
                                    else PUSCHTransmitter(pusch_configs, output_domain=self._domain))
         self._cfg.resource_grid = self._pusch_transmitter.resource_grid
+        self._cfg.pilot_indices = pusch_config.dmrs_symbol_indices
 
         # Create PUSCHReceiver
         rx_tx_association = np.ones([1, self._num_ue], bool)
@@ -123,7 +124,6 @@ class PUSCHLinkE2E:
         if self._training:
             self._bce = tf.keras.losses.BinaryCrossentropy(from_logits=True)
 
-    # XLA currently not supported by the CIRDataset function
     @tf.function(jit_compile=False)
     def __call__(self, batch_size, ebno_db):
 

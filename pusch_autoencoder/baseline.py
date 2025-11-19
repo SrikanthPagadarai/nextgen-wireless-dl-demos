@@ -42,13 +42,13 @@ ebno_db_test = 10.0
 e2e_model_test = PUSCHLinkE2E(
     channel_model,
     perfect_csi=False,
-    use_autoencoder=True,
+    use_autoencoder=False,
 )
 b, b_hat = e2e_model_test(batch_size, ebno_db_test)
 print("Quick check shapes:", b.shape, b_hat.shape)
 
 # BER/BLER Simulation
-ebno_db = np.arange(-3, 18, 2)
+ebno_db = np.arange(-2, 10, 1)
 
 ber_plot = PlotBER("Site-Specific MU-MIMO 5G NR PUSCH")
 
@@ -57,7 +57,7 @@ for perf_csi in [True, False]:
     e2e_model = PUSCHLinkE2E(
         channel_model,
         perfect_csi=perf_csi,
-        use_autoencoder=True,
+        use_autoencoder=False,
     )
 
     ber_i, bler_i = ber_plot.simulate(
