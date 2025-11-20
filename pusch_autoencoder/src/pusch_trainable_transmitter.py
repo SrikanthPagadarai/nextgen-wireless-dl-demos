@@ -13,30 +13,42 @@ class PUSCHTrainableTransmitter(PUSCHTransmitter):
         if self._training:
             self._setup_training()
     
+    @property
+    def trainable_variables(self):
+        if self._training:
+            return [self._points_r, self._points_i]
+        return []
+
     def _setup_training(self):
         """Setup trainable constellation"""
-        num_bits_per_symbol = self._num_bits_per_symbol        
-        qam_points = Constellation("qam", num_bits_per_symbol).points
-        
-        # trainable constellation
+        # Original QAM constellation used as initialization
+        qam_points = Constellation("qam", num_bits_per_symbol=self._num_bits_per_symbol).points
+
+        # Trainable real/imag parts as tf.Variables
+        init_r = tf.math.real(qam_points)
+        init_i = tf.math.imag(qam_points)
+
+        self._points_r = tf.Variable(
+            tf.cast(init_r, self.rdtype),
+            trainable=True,
+            name="constellation_real"
+        )
+        self._points_i = tf.Variable(
+            tf.cast(init_i, self.rdtype),
+            trainable=True,
+            name="constellation_imag"
+        )
+
+        # custom QAM constellation
         self._constellation = Constellation(
             "custom",
-            num_bits_per_symbol=num_bits_per_symbol,
-            value=qam_points,
+            num_bits_per_symbol=self._num_bits_per_symbol,
+            points=tf.complex(self._points_r, self._points_i),
             normalize=True,
             center=True
         )
-        
-        # To make the constellation trainable, we need to create seperate
-        # variables for the real and imaginary parts
-        self._points_r = self.add_weight(shape=qam_points.shape,
-                                        initializer="zeros")
-        self._points_i = self.add_weight(shape=qam_points.shape,
-                                        initializer="zeros")
-        self._points_r.assign(tf.math.real(qam_points))
-        self._points_i.assign(tf.math.imag(qam_points))
-        
-        # Replace the mapper
+
+        # Replace the mapper to use our trainable constellation
         self._mapper = Mapper(constellation=self._constellation)
     
     def call(self, inputs):
@@ -47,11 +59,9 @@ class PUSCHTrainableTransmitter(PUSCHTransmitter):
             Either batch_size (if return_bits=True) or bits tensor (if return_bits=False)
         """
         if self._training:
-            # Update constellation points from trainable weights
-            self._points = tf.complex(self._points_r, self._points_i)
-            
-            # Update constellation
-            self._constellation.points = self._points
+            # Update constellation from trainable weights
+            self._constellation.points = tf.complex(self._points_r,
+                                                    self._points_i)
         
         ### copy of PUSCHTransmitter.call from here with the additional return of c
         if self._return_bits:

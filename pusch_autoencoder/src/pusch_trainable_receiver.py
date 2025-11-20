@@ -3,6 +3,12 @@ from sionna.phy.channel import time_to_ofdm_channel
 from sionna.phy.nr import PUSCHReceiver
 
 class PUSCHTrainableReceiver(PUSCHReceiver):
+    @property
+    def trainable_variables(self):
+        if hasattr(self._mimo_detector, 'trainable_variables'):
+            return self._mimo_detector.trainable_variables
+        return []
+
     """
     Minor variant of PUSCHReceiver that returns LLRs after the LayerDemapper
     and *before* TB decoding.

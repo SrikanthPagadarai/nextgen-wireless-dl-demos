@@ -1,5 +1,6 @@
 import tensorflow as tf
 from tensorflow.keras.layers import Layer, ConvLSTM2D
+from sionna.phy.utils import log10
 from .config import Config
 
 class ConvLSTMResBlock(Layer):
@@ -54,21 +55,6 @@ class ConvLSTMResBlock(Layer):
 
 
 class PUSCHNeuralDetector(Layer):
-    """
-    PUSCH Neural MIMO-OFDM Detector using ConvLSTM2D + residual blocks.
-
-    Input shapes:
-      y      : [B, num_bs, num_bs_ant, H, W] (complex)
-      h_hat  : [B, num_bs, num_bs_ant, num_ue, num_streams_per_ue, H, W] (complex)
-      err_var: [1, 1, 1, num_ue, num_streams_per_ue, H, W] (float)
-      no     : scalar, TensorShape([]) (float)
-
-    Output:
-      llr    : [B, num_ue, num_streams_per_ue,
-                num_data_symbols * num_bits_per_symbol]
-               where num_data_symbols = H * W
-    """
-
     def __init__(
         self,
         cfg: Config,
@@ -82,11 +68,42 @@ class PUSCHNeuralDetector(Layer):
         self.num_res_blocks = int(num_res_blocks)
         self.kernel_size = kernel_size
 
-        # System parameters
+        # System parameters from config
         self._num_bits_per_symbol = int(self._cfg.num_bits_per_symbol)
         self._num_ue = int(self._cfg.num_ue)
-        self._num_streams_total = int(self._cfg.resource_grid.num_streams_per_tx)
-        self._num_streams_per_ue = self._num_streams_total // self._num_ue
+        self._num_streams_per_ue = int(self._cfg.num_layers)
+        self._num_streams_total = self._num_ue * self._num_streams_per_ue
+        self._num_bs = int(self._cfg.num_bs)
+        self._num_bs_ant = int(self._cfg.num_bs_ant)
+        self._pusch_pilot_indices = list(self._cfg.pusch_pilot_indices)
+        self._pusch_num_subcarriers = int(self._cfg.pusch_num_subcarriers)
+        self._pusch_num_symbols_per_slot = int(self._cfg.pusch_num_symbols_per_slot)
+
+        # Static number of data symbols from the resource grid.
+        # This is the number of *data-carrying* REs (excluding pilots/guards).
+        self._num_data_symbols = None
+        if hasattr(self._cfg, "resource_grid") and (self._cfg.resource_grid is not None):
+            # PUSCHTransmitter.resource_grid is a Sionna ResourceGrid, which
+            # exposes num_data_symbols (see Sionna docs / examples).
+            self._num_data_symbols = int(self._cfg.resource_grid.num_data_symbols)
+        else:
+            # Fallback for the current setup:
+            # 14 OFDM symbols, len(self._pusch_pilot_indices) pilot-only symbols,
+            # and 192 data subcarriers.
+            # This keeps things working even if resource_grid is not set.
+            self._num_data_symbols = (self._pusch_num_symbols_per_slot - len(self._pusch_pilot_indices)) * self._pusch_num_subcarriers
+
+        # Analytic input channel dimension for z:
+        # C_y      = 2 * num_bs * num_bs_ant
+        # C_h_hat  = 2 * num_bs * num_bs_ant * num_ue * num_streams_per_ue
+        # C_err    =     num_ue * num_streams_per_ue
+        # C_noise  = 1
+        self._c_in = (
+            2 * self._num_bs * self._num_bs_ant
+            + 2 * self._num_bs * self._num_bs_ant * self._num_ue * self._num_streams_per_ue
+            + self._num_ue * self._num_streams_per_ue
+            + 1
+        )
 
         # Input ConvLSTM2D: maps C_in -> num_conv2d_filters
         self._convlstm_in = ConvLSTM2D(
@@ -97,7 +114,7 @@ class PUSCHNeuralDetector(Layer):
             name="convlstm_in",
         )
 
-        # Residual ConvLSTM blocks (all with num_conv2d_filters channels)
+        # Residual ConvLSTM blocks
         self._res_blocks = [
             ConvLSTMResBlock(
                 filters=self.num_conv2d_filters,
@@ -116,6 +133,15 @@ class PUSCHNeuralDetector(Layer):
             name="convlstm_out",
         )
 
+    @property
+    def trainable_variables(self):
+        vars_ = []
+        vars_ += self._convlstm_in.trainable_variables
+        for block in self._res_blocks:
+            vars_ += block.trainable_variables
+        vars_ += self._convlstm_out.trainable_variables
+        return vars_
+    
     def call(
         self,
         y: tf.Tensor,
@@ -125,14 +151,20 @@ class PUSCHNeuralDetector(Layer):
         training=None,
     ) -> tf.Tensor:
         """
-        y      : [B, num_bs, num_bs_ant, H, W], complex
-        h_hat  : [B, num_bs, num_bs_ant, num_ue, num_streams_per_ue, H, W], complex
-        err_var: [1, 1, 1, num_ue, num_streams_per_ue, H, W], float
-        no     : scalar, TensorShape([]), float
+        PUSCH Neural MIMO-OFDM Detector.
+        
+        Input shapes:
+        y      : [B, num_bs, num_bs_ant, num_ofdm_symbols(=14), num_data_subcarriers]
+        h_hat  : [B, num_bs, num_bs_ant, num_ue, num_streams_per_ue,
+                    num_ofdm_symbols(=14), num_data_subcarriers]
+        err_var: [1, 1, 1, num_ue, num_streams_per_ue,
+                    num_ofdm_symbols(=14), num_data_subcarriers]
+        no     : scalar (TensorShape([])), noise variance.
 
-        Returns:
-          llr: [B, num_ue, num_streams_per_ue,
-                num_data_symbols * num_bits_per_symbol]
+        Output:
+        llr    : [B, num_ue, num_streams_per_ue,
+                    num_data_symbols * num_bits_per_symbol]
+                where num_data_symbols = num_ofdm_symbols * num_data_subcarriers
         """
         # Ensure dtypes
         y = tf.cast(y, tf.complex64)
@@ -140,11 +172,27 @@ class PUSCHNeuralDetector(Layer):
         err_var = tf.cast(err_var, tf.float32)
         no = tf.cast(no, tf.float32)
 
+        ## remove pilot OFDM symbols
+        pilot_idxs = tf.constant(self._pusch_pilot_indices, dtype=tf.int32)
+
+        # mask
+        mask = tf.ones(tf.shape(y)[3], dtype=tf.bool)  # [num_ofdm_symbols]
+        mask = tf.tensor_scatter_nd_update(
+            mask,
+            indices=tf.reshape(pilot_idxs, [-1, 1]),
+            updates=tf.zeros_like(pilot_idxs, dtype=tf.bool),
+        )
+
+        # Use the SAME 1-D mask for all tensors, along their OFDM-symbol axis
+        y = tf.boolean_mask(y, mask, axis=3)       # axis 3 has length 14
+        h_hat = tf.boolean_mask(h_hat, mask, axis=5)   # axis 5 has length 14
+        err_var = tf.boolean_mask(err_var, mask, axis=5)  # axis 5 has length 14
+
         # Dynamic shapes
         B = tf.shape(y)[0]
         num_bs = tf.shape(y)[1]
         num_bs_ant = tf.shape(y)[2]
-        num_ofdm_symbols = tf.shape(y)[3]        # H
+        num_ofdm_symbols_data = tf.shape(y)[3]        # H
         num_data_subcarriers = tf.shape(y)[4]    # W
 
         # ================================
@@ -158,15 +206,7 @@ class PUSCHNeuralDetector(Layer):
         # -> [B, H, W, num_bs, num_bs_ant, 2]
         y_stack = tf.transpose(y_stack, [0, 3, 4, 1, 2, 5])
         # -> [B, H, W, num_bs * num_bs_ant * 2]
-        y_feats = tf.reshape(
-            y_stack,
-            [
-                B,
-                num_ofdm_symbols,
-                num_data_subcarriers,
-                num_bs * num_bs_ant * 2,
-            ],
-        )
+        y_feats = tf.reshape(y_stack, [B,num_ofdm_symbols_data,num_data_subcarriers,num_bs * num_bs_ant * 2])
 
         # ==========================================
         # 2) h_hat features (KEEP BS/ant, UE, stream)
@@ -181,48 +221,44 @@ class PUSCHNeuralDetector(Layer):
         h_stack = tf.transpose(h_stack, [0, 5, 6, 1, 2, 3, 4, 7])
         # Flatten all non-spatial dims into channels
         # C_h_hat = num_bs * num_bs_ant * num_ue * num_streams_per_ue * 2
-        h_feats = tf.reshape(
-            h_stack,
-            [
-                B,
-                num_ofdm_symbols,
-                num_data_subcarriers,
-                -1,
-            ],
-        )
+        h_feats = tf.reshape(h_stack,[B,num_ofdm_symbols_data,num_data_subcarriers,-1])
 
         # ===========================
-        # 3) err_var features (per UE)
+        # 3) err_var features (per UE, link quality)
         # ===========================
-        # err_var: [1, 1, 1, num_ue, num_streams_per_ue, H, W]
-        # Tile over batch dimension:
-        err_var_t = tf.tile(
-            err_var,
-            [B, 1, 1, 1, 1, 1, 1],
-        )  # [B, 1, 1, num_ue, num_streams_per_ue, H, W]
-        # Remove dummy dims:
-        err_var_t = tf.squeeze(err_var_t, axis=[1, 2])  # [B, num_ue, num_streams_per_ue, H, W]
-        # -> [B, H, W, num_ue, num_streams_per_ue]
+        # err_var after masking pilots:
+        #   [B, 1, 1, num_ue, num_streams_per_ue, H, W]
+        #   where H = num_ofdm_symbols_data
+        #
+        # Remove the two singleton dims (1, 2), keep batch dim B:
+        err_var_t = tf.squeeze(err_var, axis=[1, 2])      # [B, num_ue, streams, H, W]
+
+        # Reorder to [B, H, W, num_ue, num_streams_per_ue]
         err_feats = tf.transpose(err_var_t, [0, 3, 4, 1, 2])
+
+        # Collapse UE and stream dims into channels:
         # -> [B, H, W, num_ue * num_streams_per_ue]
         err_feats = tf.reshape(
             err_feats,
-            [
-                B,
-                num_ofdm_symbols,
-                num_data_subcarriers,
-                self._num_ue * self._num_streams_per_ue,
-            ],
+            [B,
+             num_ofdm_symbols_data,      # H after masking
+             num_data_subcarriers,       # W
+             self._num_ue * self._num_streams_per_ue],
         )
 
         # ==================================
-        # 4) noise variance as scalar feature
+        # 4) noise variance as per-batch feature
         # ==================================
-        # no: scalar -> [B, H, W, 1]
-        no_expanded = tf.reshape(no, [1, 1, 1, 1])
-        no_expanded = tf.tile(
-            no_expanded,
-            [B, num_ofdm_symbols, num_data_subcarriers, 1],
+        # no: [B] (per-sample) or scalar -> log10 and broadcast to [B, H, W, 1]
+        no = log10(no)  # shape [B] (or [])
+
+        # Reshape to [B, 1, 1, 1] so each batch element gets its own constant plane
+        no_reshaped = tf.reshape(no, [B, 1, 1, 1])
+
+        # Broadcast directly to [B, H, W, 1]
+        no_expanded = tf.broadcast_to(
+            no_reshaped,
+            [B, num_ofdm_symbols_data, num_data_subcarriers, 1],
         )
 
         # ==================================
@@ -235,6 +271,10 @@ class PUSCHNeuralDetector(Layer):
         #   C_noise  = 1
         z = tf.concat([y_feats, h_feats, err_feats, no_expanded], axis=-1)
         z = tf.cast(z, tf.float32)
+
+        # Make channel dimension static for ConvLSTM2D
+        # Shape is [B, H, W, C_in] with C_in known analytically.
+        z.set_shape([None, None, None, self._c_in])
 
         # ==================================
         # ConvLSTM2D stack with residuals
@@ -267,37 +307,29 @@ class PUSCHNeuralDetector(Layer):
         # ==================================
         # Reshape to LLRs
         # ==================================
-        num_data_symbols = num_ofdm_symbols * num_data_subcarriers
+        # Use static num_data_symbols from the ResourceGrid so that the last
+        # LLR dimension is statically known for LayerDemapper.build().
+        num_data_symbols = self._num_data_symbols  # Python int
 
         F = tf.shape(z)[-1]
         tf.debugging.assert_equal(
             F,
             self._num_streams_total * self._num_bits_per_symbol,
-            message="ConvLSTM2D output channels must be num_streams_total * num_bits_per_symbol",
+            message="ConvLSTM2D output channels must be "
+                    "num_streams_total * num_bits_per_symbol",
         )
 
         # z: [B, H, W, num_streams_total * num_bits_per_symbol]
         # -> [B, num_data_symbols, num_streams_total, num_bits_per_symbol]
         z = tf.reshape(
             z,
-            [
-                B,
-                num_data_symbols,
-                self._num_streams_total,
-                self._num_bits_per_symbol,
-            ],
+            [B, num_data_symbols, self._num_streams_total, self._num_bits_per_symbol],
         )
 
         # -> [B, num_data_symbols, num_ue, num_streams_per_ue, num_bits_per_symbol]
         z = tf.reshape(
             z,
-            [
-                B,
-                num_data_symbols,
-                self._num_ue,
-                self._num_streams_per_ue,
-                self._num_bits_per_symbol,
-            ],
+            [B, num_data_symbols, self._num_ue, self._num_streams_per_ue, self._num_bits_per_symbol],
         )
 
         # Reorder to [B, num_ue, num_streams_per_ue, num_data_symbols, bits]
@@ -306,12 +338,19 @@ class PUSCHNeuralDetector(Layer):
         # Flatten over (num_data_symbols * bits):
         llr = tf.reshape(
             z,
+            [B, self._num_ue, self._num_streams_per_ue,
+             num_data_symbols * self._num_bits_per_symbol],
+        )
+
+        # Make the last dimension static so LayerDemapper.build() can see it
+        llr.set_shape(
             [
-                B,
+                None,
                 self._num_ue,
                 self._num_streams_per_ue,
                 num_data_symbols * self._num_bits_per_symbol,
-            ],
+            ]
         )
 
         return llr
+
