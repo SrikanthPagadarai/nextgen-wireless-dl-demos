@@ -3,6 +3,12 @@ from sionna.phy.channel import time_to_ofdm_channel
 from sionna.phy.nr import PUSCHReceiver
 
 class PUSCHTrainableReceiver(PUSCHReceiver):
+    def __init__(self, *, training=False, **kwargs):
+        self._training = training
+
+        # parent constructor
+        super().__init__(**kwargs)
+
     @property
     def trainable_variables(self):
         if hasattr(self._mimo_detector, 'trainable_variables'):
@@ -53,5 +59,14 @@ class PUSCHTrainableReceiver(PUSCHReceiver):
         # Layer demapping
         llr = self._layer_demapper(llr)
 
-        # return the LLRs
-        return llr
+        if self._training:
+            # return the LLRs
+            return llr
+        else:
+            # TB Decoding
+            b_hat, tb_crc_status = self._tb_decoder(llr)
+
+            if self._return_tb_crc_status:
+                return b_hat, tb_crc_status
+            else:
+                return b_hat
