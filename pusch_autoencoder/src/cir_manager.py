@@ -241,7 +241,7 @@ class CIRManager:
             paths = p_solver(
                 self.scene,
                 max_depth=self.max_depth,
-                max_num_paths_per_src=10000
+                max_num_paths_per_src=10**7
             )
             
             # Get CIR
@@ -454,76 +454,63 @@ class CIRManager:
         
         return channel_model
     
-    def generate_and_save(self, num_files=2, tfrecord_dir="../cir_tfrecords", save_radio_map=True):
-        """Generate and save CIR data to TFRecord files.
-        
-        Main orchestration method that replaces the gen_cir() function.
-        
-        Args:
-            num_files: Number of TFRecord files to generate
-            tfrecord_dir: Directory to save TFRecord files
-            save_radio_map: If True, saves radio map visualizations
-        """
-        # Setup scene and compute radio map
-        self.setup_scene()
-        self.compute_radio_map(save_images=save_radio_map)
-        
-        # Save visualization with UEs if requested
-        if save_radio_map:
-            # Sample and add some UE positions for visualization
-            ue_pos, _ = self.rm.sample_positions(
-                num_pos=self.batch_size_cir,
-                metric="path_gain",
-                min_val_db=self.min_gain_db,
-                max_val_db=self.max_gain_db,
-                min_dist=self.min_dist,
-                max_dist=self.max_dist
-            )
-            
-            for i in range(self.batch_size_cir):
-                p = ue_pos[0, i, :]
-                if hasattr(p, "numpy"):
-                    p = p.numpy()
-                p = np.asarray(p, dtype=np.float64)
-                
-                rx = Receiver(
-                    name=f"rx-{i}",
-                    position=(float(p[0]), float(p[1]), float(p[2])),
-                    velocity=(3.0, 3.0, 0.0),
-                    display_radius=1.0,
-                    color=(1, 0, 0)
-                )
-                self.scene.add(rx)
-            
-            self.scene.render_to_file(
-                camera=self.camera,
-                radio_map=self.rm,
-                rm_vmin=self.rm_vmin_db,
-                clip_at=self.rm_clip_at,
-                resolution=list(self.rm_resolution),
-                filename="munich_radio_map_with_UEs.png",
-                num_samples=self.rm_num_samples
-            )
-        
-        # Create directory for TFRecord files
-        os.makedirs(tfrecord_dir, exist_ok=True)
-        
-        # Generate and save files
-        max_num_paths = 0
-        for file_idx in range(num_files):
-            print(f"\nGenerating file {file_idx+1}/{num_files}")
-            
-            # Generate CIR data with different seed for each file
-            a, tau, max_num_paths = self.generate_cir_data(seed_offset=file_idx, max_num_paths=max_num_paths)
-            
-            print(f"\n  File {file_idx+1}: a.shape={a.shape}, tau.shape={tau.shape}")
-            print(f"  Max. number of paths: {max_num_paths}")
-            
-            # Save to TFRecord
-            filename = os.path.join(tfrecord_dir, f"cir_{file_idx:03d}.tfrecord")
-            self.save_to_tfrecord(a, tau, filename)
-        
-        print(f"\nSuccessfully generated and saved {num_files} TFRecord files in '{tfrecord_dir}/' directory")
+def generate_and_save(self, seed_offsets, tfrecord_dir="../cir_tfrecords", save_radio_map=True):
+    """
+    Generate and save CIR data to TFRecord files.
+
+    Args:
+        seed_offsets : int or list[int]
+            - If int → treat as a single seed offset.
+            - If list → generate one file per seed.
+        tfrecord_dir : str
+            Directory where TFRecord files will be saved.
+        save_radio_map : bool
+            If True, saves radio map visualizations.
+    """
+
+    # Normalize input to a list
+    if isinstance(seed_offsets, int):
+        seed_list = [seed_offsets]
+    elif isinstance(seed_offsets, (list, tuple)):
+        seed_list = list(seed_offsets)
+    else:
+        raise ValueError("seed_offsets must be an int or a list/tuple of ints")
+
+    # Prepare scene and radio map
+    self.setup_scene()
+    self.compute_radio_map(save_images=save_radio_map)
+
+    if save_radio_map:
+        self.save_visualization_ue_positions()
+
+    # Ensure output directory exists
+    os.makedirs(tfrecord_dir, exist_ok=True)
+
+    # Track the maximum number of paths across all files
+    max_num_paths_all = 0
+
+    # Generate a file per seed
+    for idx, seed in enumerate(seed_list):
+        print(f"\nGenerating CIR file {idx+1}/{len(seed_list)}  (seed_offset={seed})")
+
+        # Generate CIR data
+        a, tau, max_num_paths = self.generate_cir_data(
+            seed_offset=seed
+        )
+
+        max_num_paths_all = max(max_num_paths_all, max_num_paths)
+
+        print(f"  a.shape={a.shape}, tau.shape={tau.shape}")
+        print(f"  max_num_paths={max_num_paths}")
+
+        # File name uses the seed value for clarity
+        filename = os.path.join(tfrecord_dir, f"cir_seed_{seed:03d}.tfrecord")
+
+        self.save_to_tfrecord(a, tau, filename)
+
+    print(f"\nSuccessfully generated {len(seed_list)} TFRecord files.")
+    print(f"All files saved in '{tfrecord_dir}' directory.")
+    print(f"Global max_num_paths across all seeds = {max_num_paths_all}")
 
 if __name__ == "__main__":
     print("\n CIR Generation Started")
@@ -532,7 +519,7 @@ if __name__ == "__main__":
         cir_manager = CIRManager()
         
         # Generate and save CIR data
-        cir_manager.generate_and_save(num_files=2, save_radio_map=True)
+        cir_manager.generate_and_save([1, 2, 3, 10])
 
         print("\n CIR Generation Completed Successfully \n")
     except Exception as e:

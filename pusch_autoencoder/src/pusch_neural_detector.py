@@ -58,8 +58,8 @@ class PUSCHNeuralDetector(Layer):
     def __init__(
         self,
         cfg: Config,
-        num_conv2d_filters: int = 64,
-        num_res_blocks: int = 2,
+        num_conv2d_filters: int = 128,
+        num_res_blocks: int = 3,
         kernel_size=(3, 3),
     ):
         super().__init__()
@@ -244,15 +244,20 @@ class PUSCHNeuralDetector(Layer):
         # ==================================
         # 4) noise variance as per-batch feature
         # ==================================
-        # no: [B] (per-sample) or scalar -> log10 and broadcast to [B, H, W, 1]
-        no = log10(no)  # shape [B] (or [])
+        # no: scalar [] or [B] -> log10 and broadcast to [B, H, W, 1]
+        no = tf.cast(no, tf.float32)
+        no = log10(no)
 
-        # Reshape to [B, 1, 1, 1] so each batch element gets its own constant plane
-        no_reshaped = tf.reshape(no, [B, 1, 1, 1])
+        # Shape info
+        B = tf.shape(y)[0]
+        num_ofdm_symbols_data = tf.shape(y)[3]     # H
+        num_data_subcarriers = tf.shape(y)[4]      # W
 
-        # Broadcast directly to [B, H, W, 1]
+        # Broadcast no to [B, H, W, 1]
+        # - If no is scalar [], no[..., None, None, None] -> [1,1,1]
+        # - If no is [B], no[..., None, None, None] -> [B,1,1,1]
         no_expanded = tf.broadcast_to(
-            no_reshaped,
+            no[..., tf.newaxis, tf.newaxis, tf.newaxis],
             [B, num_ofdm_symbols_data, num_data_subcarriers, 1],
         )
 
@@ -300,11 +305,15 @@ class PUSCHNeuralDetector(Layer):
         z = tf.squeeze(z_seq, axis=3)
 
         # ==================================
-        # Reshape to LLRs
+        # Reshape to LLRs (dynamic num_data_symbols)
         # ==================================
-        # Use static num_data_symbols from the ResourceGrid so that the last
-        # LLR dimension is statically known for LayerDemapper.build().
-        num_data_symbols = self._num_data_symbols  # Python int
+        # z has shape: [B, H, W, num_streams_total * num_bits_per_symbol]
+        B = tf.shape(z)[0]
+        H = tf.shape(z)[1]
+        W = tf.shape(z)[2]
+
+        # Dynamic number of data symbols as seen by the detector
+        num_data_symbols = H * W  # scalar tf.int32
 
         F = tf.shape(z)[-1]
         tf.debugging.assert_equal(
@@ -314,38 +323,47 @@ class PUSCHNeuralDetector(Layer):
                     "num_streams_total * num_bits_per_symbol",
         )
 
-        # z: [B, H, W, num_streams_total * num_bits_per_symbol]
-        # -> [B, num_data_symbols, num_streams_total, num_bits_per_symbol]
+        tf.print("DEBUG: z shape BEFORE reshaping:", tf.shape(z), summarize=-1)
+        
+        # [B, H, W, F] -> [B, num_data_symbols, num_streams_total, num_bits_per_symbol]
         z = tf.reshape(
             z,
-            [B, num_data_symbols, self._num_streams_total, self._num_bits_per_symbol],
+            [B,
+             num_data_symbols,
+             self._num_streams_total,
+             self._num_bits_per_symbol],
         )
 
         # -> [B, num_data_symbols, num_ue, num_streams_per_ue, num_bits_per_symbol]
         z = tf.reshape(
             z,
-            [B, num_data_symbols, self._num_ue, self._num_streams_per_ue, self._num_bits_per_symbol],
+            [B,
+             num_data_symbols,
+             self._num_ue,
+             self._num_streams_per_ue,
+             self._num_bits_per_symbol],
         )
 
         # Reorder to [B, num_ue, num_streams_per_ue, num_data_symbols, bits]
         z = tf.transpose(z, [0, 2, 3, 1, 4])
 
-        # Flatten over (num_data_symbols * bits):
+        # Flatten over (num_data_symbols * bits) per stream:
         llr = tf.reshape(
             z,
-            [B, self._num_ue, self._num_streams_per_ue,
+            [B,
+             self._num_ue,
+             self._num_streams_per_ue,
              num_data_symbols * self._num_bits_per_symbol],
         )
 
-        # Make the last dimension static so LayerDemapper.build() can see it
+        # We only fix the static parts (UE and streams); let the last dim be dynamic
         llr.set_shape(
             [
                 None,
                 self._num_ue,
                 self._num_streams_per_ue,
-                num_data_symbols * self._num_bits_per_symbol,
+                None,
             ]
         )
 
         return llr
-

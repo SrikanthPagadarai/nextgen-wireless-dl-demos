@@ -3,12 +3,11 @@ from sionna.phy.mapping import Mapper, Constellation
 import tensorflow as tf
 
 class PUSCHTrainableTransmitter(PUSCHTransmitter):
-    def __init__(self, pusch_config, return_bits=True, output_domain="freq", 
-                 training=True, **kwargs):
+    def __init__(self, *args, training=False, **kwargs):
         self._training = training
         
         # parent constructor
-        super().__init__(pusch_config, return_bits, output_domain, **kwargs)
+        super().__init__(*args, **kwargs)
         
         if self._training:
             self._setup_training()

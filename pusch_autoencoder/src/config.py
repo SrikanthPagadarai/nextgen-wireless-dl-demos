@@ -19,8 +19,8 @@ class Config:
     _num_ue_ant: int = field(init=False, default=4, repr=False)                # UE antennas
     _num_bs_ant: int = field(init=False, default=16, repr=False)               # BS antennas
 
-    _batch_size_cir: int = field(init=False, default=40, repr=False)          # batch for CIR generation
-    _target_num_cirs: int = field(init=False, default=80, repr=False)         # total CIRs to generate
+    _batch_size_cir: int = field(init=False, default=100, repr=False)          # batch for CIR generation
+    _target_num_cirs: int = field(init=False, default=5000, repr=False)         # total CIRs to generate
 
     _resource_grid: object = field(init=False, default=None, repr=False)
     _pusch_pusch_pilot_indices: List[int] = field(init=False, repr=False)
@@ -36,14 +36,14 @@ class Config:
 
     # Radio map rendering
     _rm_cell_size: Tuple[float, float] = field(init=False, default=(1.0, 1.0), repr=False)
-    _rm_samples_per_tx: int = field(init=False, default=10000, repr=False)
+    _rm_samples_per_tx: int = field(init=False, default=10**7, repr=False)
     _rm_vmin_db: float = field(init=False, default=-110.0, repr=False)
     _rm_clip_at: float = field(init=False, default=12.0, repr=False)
     _rm_resolution: Tuple[int, int] = field(init=False, default=(650, 500), repr=False)
     _rm_num_samples: int = field(init=False, default=4096, repr=False)
 
     # BER/BLER simulation
-    _batch_size: int = field(init=False, default=20, repr=False)               # must match CIRDataset batch size
+    _batch_size: int = field(init=False, default=32, repr=False)               # must match CIRDataset batch size
 
     # Internal seed
     _seed: int = field(init=False, default=42, repr=False)

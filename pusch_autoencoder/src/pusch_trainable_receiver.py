@@ -3,11 +3,11 @@ from sionna.phy.channel import time_to_ofdm_channel
 from sionna.phy.nr import PUSCHReceiver
 
 class PUSCHTrainableReceiver(PUSCHReceiver):
-    def __init__(self, *, training=False, **kwargs):
+    def __init__(self, *args, training=False, **kwargs):
         self._training = training
 
         # parent constructor
-        super().__init__(**kwargs)
+        super().__init__(*args, **kwargs)
 
     @property
     def trainable_variables(self):
@@ -16,8 +16,7 @@ class PUSCHTrainableReceiver(PUSCHReceiver):
         return []
 
     """
-    Minor variant of PUSCHReceiver that returns LLRs after the LayerDemapper
-    and *before* TB decoding.
+    Minor variant of PUSCHReceiver that returns LLRs before TB decoding in training mode.
     """   
     def call(self, y, no, h=None):
         ### copy of PUSCHReceiver.call up to the TBDecoder

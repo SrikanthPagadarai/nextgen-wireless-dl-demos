@@ -102,12 +102,13 @@ class PUSCHLinkE2E(tf.keras.Model):
 
         self._pusch_receiver = receiver(pusch_transmitter=self._pusch_transmitter, **receiver_kwargs)
 
-        # configure pieces that are training-only or otherwise
-        if self._use_autoencoder and self._training:
+        # configure differentiable channel for autoencoder, iterable channel for baseline
+        if self._use_autoencoder:
             self._frequencies = subcarrier_frequencies(self._pusch_transmitter.resource_grid.fft_size, self._pusch_transmitter.resource_grid.subcarrier_spacing)
             self._channel = ApplyOFDMChannel(add_awgn=True)
 
-            self._bce = tf.keras.losses.BinaryCrossentropy(from_logits=True)
+            if self._training:
+                self._bce = tf.keras.losses.BinaryCrossentropy(from_logits=True)
         else:
             self._channel = OFDMChannel(
                 self._channel_model,
@@ -140,7 +141,7 @@ class PUSCHLinkE2E(tf.keras.Model):
             self._pusch_transmitter.resource_grid,
         )
 
-        if self._use_autoencoder and self._training:
+        if self._use_autoencoder:
             a, tau = self._channel_model
             num_samples = tf.shape(a)[0]
 

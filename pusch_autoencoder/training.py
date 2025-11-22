@@ -66,32 +66,47 @@ for v, g in zip(rx_vars, grads_rx):
 
 print("=== End gradient sanity check ===\n")
 
-### training
-# parameters
+# ----------------------------------------
+# Training loop
+# ----------------------------------------
 ebno_db_min = -2.0
 ebno_db_max = 10.0
 training_batch_size = batch_size
 num_training_iterations = 100
 
-# Optimizer used to apply gradients
-optimizer = tf.keras.optimizers.Adam()
+optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4)
 
 @tf.function(jit_compile=False)
 def train_step():
-    # Sampling a batch of SNRs
-    ebno_db = tf.random.uniform(shape=[training_batch_size], minval=ebno_db_min, maxval=ebno_db_max)
-    # Forward pass
+    ebno_db = tf.random.uniform(
+        shape=[training_batch_size],
+        minval=ebno_db_min,
+        maxval=ebno_db_max
+    )
     with tf.GradientTape() as tape:
-        loss = model(training_batch_size,  ebno_db)
-    # Computing and applying gradients
+        loss = model(training_batch_size, ebno_db)
     weights = model.trainable_variables
     grads = tape.gradient(loss, weights)
     optimizer.apply_gradients(zip(grads, weights))
     return loss
 
+# store loss values for plotting
+loss_history = []
+
+
 for i in range(num_training_iterations):
     loss = train_step()
-    print('Iteration {}/{}  BCE: {:.4f}'.format(i, num_training_iterations, loss.numpy()), end='\r',flush=True)
+    loss_value = float(loss.numpy())
+    loss_history.append(loss_value)
+    print(
+        'Iteration {}/{}  BCE: {:.4f}'.format(
+            i + 1, num_training_iterations, loss_value
+        ),
+        end='\r',
+        flush=True
+    )
+print()  # newline after the loop
+
 
 # Save weights
 os.makedirs("results", exist_ok=True)
@@ -101,35 +116,66 @@ with open(weights_path, 'wb') as f:
     pickle.dump(weights, f)
 
 # ----------------------------------------
-# Constellation before vs after training
+# Plot training loss vs iteration
 # ----------------------------------------
-# Constellation AFTER training (current model)
+plt.figure(figsize=(6, 4))
+plt.plot(loss_history)
+plt.xlabel("Iteration")
+plt.ylabel("BCE loss")
+plt.title("Training loss vs. iteration")
+plt.grid(True, linestyle="--", linewidth=0.5)
+
+loss_fig_path = os.path.join("results", "training_loss.png")
+plt.savefig(loss_fig_path, dpi=150)
+plt.close()
+
+print(f"Saved training loss plot to: {loss_fig_path}")
+
+# ----------------------------------------
+# Constellation before vs after training (overlaid)
+# ----------------------------------------
 trained_const_real = model._pusch_transmitter._points_r
 trained_const_imag = model._pusch_transmitter._points_i
 
-# Build complex constellations
 const_init = tf.complex(init_const_real, init_const_imag)
 const_trained = tf.complex(trained_const_real, trained_const_imag)
 
-def plot_constellation(ax, const, title):
-    pts = const.numpy()
-    ax.scatter(pts.real, pts.imag, s=20)
-    ax.axhline(0.0, linewidth=0.5)
-    ax.axvline(0.0, linewidth=0.5)
-    ax.set_aspect("equal", "box")
-    ax.grid(True, linestyle="--", linewidth=0.5)
-    ax.set_title(title)
-
 # Make sure results directory exists
 os.makedirs("results", exist_ok=True)
-fig, axes = plt.subplots(1, 2, figsize=(10, 4))
 
-plot_constellation(axes[0], const_init, "Initial constellation")
-plot_constellation(axes[1], const_trained, "Trained constellation")
+fig, ax = plt.subplots(figsize=(5, 5))
+
+pts_init = const_init.numpy()
+pts_trained = const_trained.numpy()
+
+ax.scatter(
+    pts_init.real,
+    pts_init.imag,
+    s=25,
+    marker='o',
+    label='Initial'
+)
+ax.scatter(
+    pts_trained.real,
+    pts_trained.imag,
+    s=25,
+    marker='x',
+    label='Trained'
+)
+
+ax.axhline(0.0, linewidth=0.5)
+ax.axvline(0.0, linewidth=0.5)
+ax.set_aspect("equal", "box")
+ax.grid(True, linestyle="--", linewidth=0.5)
+ax.set_title("Constellation: initial vs trained")
+ax.set_xlabel("In-phase")
+ax.set_ylabel("Quadrature")
+ax.legend()
 
 fig.tight_layout()
-fig_path = os.path.join("results", "constellations_before_after.png")
+fig_path = os.path.join("results", "constellations_overlaid.png")
 plt.savefig(fig_path, dpi=150)
 plt.close(fig)
 
-print(f"\nSaved constellation comparison plot to: {fig_path}")
+print(f"Saved constellation comparison plot to: {fig_path}")
+
