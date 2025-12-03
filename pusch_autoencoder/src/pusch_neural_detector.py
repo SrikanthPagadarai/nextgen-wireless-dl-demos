@@ -113,11 +113,6 @@ class PUSCHNeuralDetector(Layer):
             activation=None,
             name="conv_out",
         )
-        
-        # Learnable scaling for correction
-        self._correction_scale = tf.Variable(
-            0.3, trainable=True, name="correction_scale", dtype=tf.float32
-        )
 
     @property
     def trainable_variables(self):
@@ -126,7 +121,6 @@ class PUSCHNeuralDetector(Layer):
         for block in self._res_blocks:
             vars_ += block.trainable_variables
         vars_ += self._conv2d_out.trainable_variables
-        vars_ += [self._correction_scale]
         return vars_
 
     def _reshape_logits_to_llr(self, logits, num_data_symbols):
@@ -198,21 +192,8 @@ class PUSCHNeuralDetector(Layer):
         eye = eye[tf.newaxis, tf.newaxis, tf.newaxis, :, :]
         s = tf.cast(total_noise_var[..., tf.newaxis, tf.newaxis], tf.complex64) * eye
 
-        # === LMMSE using Sionna ===
+        # LMMSE
         x_lmmse, no_eff = lmmse_equalizer(y_flat, h_flat, s, whiten_interference=True)
-        
-        # === Demapping using Sionna's Demapper ===
-        # Flatten all dims: [B, H, W, S] -> [B*H*W*S]
-        x_lmmse_flat = tf.reshape(x_lmmse, [-1])
-        no_eff_flat = tf.reshape(no_eff, [-1])
-        
-        # Call demapper once on all symbols
-        # Output: [B*H*W*S, num_bits_per_symbol]
-        llr_lmmse_flat = self._demapper(x_lmmse_flat, no_eff_flat)
-        
-        # Reshape back: [B*H*W*S, bits] -> [B, H, W, S, bits] -> [B, H, W, S*bits]
-        llr_lmmse = tf.reshape(llr_lmmse_flat, [B, H, W, self._num_streams_total, self._num_bits_per_symbol])
-        llr_lmmse = tf.reshape(llr_lmmse, [B, H, W, self._num_streams_total * self._num_bits_per_symbol])
 
         # === Build features for refinement network ===
         # Compute matched filter and Gram for additional features
@@ -251,9 +232,8 @@ class PUSCHNeuralDetector(Layer):
         z_feat = self._conv2d_in(z)
         for block in self._res_blocks:
             z_feat = block(z_feat)
-        llr_correction = self._conv2d_out(z_feat)
         
-        # === Final LLR = LMMSE LLR + learned correction ===
-        llr_final = llr_lmmse + self._correction_scale * llr_correction
+        # LLR
+        llr = self._conv2d_out(z_feat)
 
-        return self._reshape_logits_to_llr(llr_final, num_data_symbols)
+        return self._reshape_logits_to_llr(llr, num_data_symbols)
