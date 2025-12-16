@@ -7,10 +7,12 @@ from sionna.phy.ofdm import ResourceGrid
 
 CDLModel = Literal["A", "B", "C", "D", "E"]
 
+
 class BitsPerSym(IntEnum):
-    BPSK  = 1   # 2^1 = 2-QAM
-    QPSK  = 2   # 2^2 = 4-QAM
-    QAM16 = 4   # 2^4 = 16-QAM
+    BPSK = 1  # 2^1 = 2-QAM
+    QPSK = 2  # 2^2 = 4-QAM
+    QAM16 = 4  # 2^4 = 16-QAM
+
 
 @dataclass(slots=True)
 class Config:
@@ -30,9 +32,9 @@ class Config:
     # user-settable parameters
     perfect_csi: bool = False
     cdl_model: CDLModel = "D"
-    delay_spread: float = 300e-9 # seconds
-    carrier_frequency: float = 2.6e9 # Hz
-    speed: float = 0.0 # m/s (UE speed)
+    delay_spread: float = 300e-9  # seconds
+    carrier_frequency: float = 2.6e9  # Hz
+    speed: float = 0.0  # m/s (UE speed)
     num_bits_per_symbol: BitsPerSym = BitsPerSym.QPSK
 
     # hard-coded PHY/system parameters
@@ -44,7 +46,9 @@ class Config:
     _num_guard_carriers: Tuple[int, int] = field(init=False, default=(5, 6), repr=False)
     _dc_null: bool = field(init=False, default=True, repr=False)
     _pilot_pattern: str = field(init=False, default="kronecker", repr=False)
-    _pilot_ofdm_symbol_indices: Tuple[int, ...] = field(init=False, default=(2, 5, 8, 11), repr=False)
+    _pilot_ofdm_symbol_indices: Tuple[int, ...] = field(
+        init=False, default=(2, 5, 8, 11), repr=False
+    )
     _num_ut_ant: int = field(init=False, default=4, repr=False)
     _num_bs_ant: int = field(init=False, default=8, repr=False)
     _modulation: str = field(init=False, default="qam", repr=False)
@@ -60,23 +64,39 @@ class Config:
     _num_streams_per_tx: int = field(init=False, repr=False)
 
     # enforce immutability
-    _IMMUTABLE_FIELDS: ClassVar[FrozenSet[str]] = frozenset({
-        "_direction", "_subcarrier_spacing", "_fft_size", "_num_ofdm_symbols", "_cyclic_prefix_length",
-        "_num_guard_carriers", "_dc_null", "_pilot_pattern", "_pilot_ofdm_symbol_indices",
-        "_num_ut_ant", "_num_bs_ant", "_modulation", "_num_bits_per_symbol", "_coderate", "_seed",
-    })
+    _IMMUTABLE_FIELDS: ClassVar[FrozenSet[str]] = frozenset(
+        {
+            "_direction",
+            "_subcarrier_spacing",
+            "_fft_size",
+            "_num_ofdm_symbols",
+            "_cyclic_prefix_length",
+            "_num_guard_carriers",
+            "_dc_null",
+            "_pilot_pattern",
+            "_pilot_ofdm_symbol_indices",
+            "_num_ut_ant",
+            "_num_bs_ant",
+            "_modulation",
+            "_num_bits_per_symbol",
+            "_coderate",
+            "_seed",
+        }
+    )
     _immutable_locked: bool = field(init=False, default=False, repr=False)
 
     def __setattr__(self, name, value):
         if getattr(self, "_immutable_locked", False) and name in self._IMMUTABLE_FIELDS:
-            raise AttributeError(f"{name} is immutable (hard-coded PHY/system parameter).")
+            raise AttributeError(
+                f"{name} is immutable (hard-coded PHY/system parameter)."
+            )
         super().__setattr__(name, value)
-    
+
     # build/cache objects used across modules
     def build(self) -> "Config":
         # map one stream per UT antenna
         self._num_streams_per_tx = self._num_ut_ant
-        
+
         # Stream matrix: one TX, one RX stream group
         self._sm = StreamManagement(np.array([[1]]), self._num_streams_per_tx)
 

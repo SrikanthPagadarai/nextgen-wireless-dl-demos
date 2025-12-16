@@ -19,15 +19,15 @@ if not os.path.exists(results_path):
         "Run `python3 baseline.py` first to generate BER/BLER results."
     )
 conv_inf_results_path = os.path.join("results", "inference_results_conventional.npz")
-two_phase_inf_results_path = os.path.join("results", "inference_results_two_phase.npz")
+# two_phase_inf_results_path = os.path.join("results", "inference_results_two_phase.npz")
 
 data = np.load(results_path)
 conv_inf_data = np.load(conv_inf_results_path)
-two_phase_inf_data = np.load(two_phase_inf_results_path)
+# two_phase_inf_data = np.load(two_phase_inf_results_path)
 ebno_db = data["ebno_db"]
 bler = data["bler"]
 conv_inf_bler = conv_inf_data["bler"]
-two_phase_inf_bler = two_phase_inf_data["bler"]
+# two_phase_inf_bler = two_phase_inf_data["bler"]
 
 # Plot BLER
 plt.figure()
@@ -39,8 +39,14 @@ for idx, csi_label in enumerate(["(Perfect CSI)", "(Imperfect CSI)"]):
         linestyle="-",
         label=f"LMMSE {csi_label}",
     )
-plt.semilogy(ebno_db,conv_inf_bler,marker="o",linestyle="-",label=f"Neural MIMO Detector (Imperfect CSI, SGD)")
-plt.semilogy(ebno_db,two_phase_inf_bler,marker="o",linestyle="-",label=f"Neural MIMO Detector (Imperfect CSI, Two-Phase)")
+plt.semilogy(
+    ebno_db,
+    conv_inf_bler,
+    marker="o",
+    linestyle="-",
+    label=f"Neural MIMO Detector (Imperfect CSI, SGD)",
+)
+# plt.semilogy(ebno_db,two_phase_inf_bler,marker="o",linestyle="-",label=f"Neural MIMO Detector (Imperfect CSI, Two-Phase)")
 plt.xlabel("Eb/N0 [dB]")
 plt.ylabel("BLER")
 plt.title("PUSCH - BLER vs Eb/N0")
@@ -55,19 +61,21 @@ plt.savefig(outfile, dpi=300, bbox_inches="tight")
 plt.close()
 print(f"Saved BLER plot to {outfile}")
 
+
 # Constellation: Initial vs Final (Normalized)
 def normalize_constellation(points_r, points_i):
     """Apply same normalization as get_normalized_constellation()."""
     points = points_r + 1j * points_i
-    
+
     # Center (subtract mean)
     points = points - np.mean(points)
-    
+
     # Normalize to unit power
     energy = np.mean(np.abs(points) ** 2)
     points = points / np.sqrt(energy)
-    
+
     return points
+
 
 def standard_16qam():
     """Generate standard 16-QAM constellation (unit power)."""
@@ -76,49 +84,90 @@ def standard_16qam():
     points = (real.flatten() + 1j * imag.flatten()) / np.sqrt(10)
     return points
 
+
 # Initial: standard 16-QAM
 init_const = standard_16qam()
 
+# Load and analyze training loss
+loss_path = os.path.join("results", "conventional_training_loss.npy")
+if os.path.exists(loss_path):
+    loss_values = np.load(loss_path)
+    best_loss = np.min(loss_values)
+    best_iteration = np.argmin(loss_values)
+    print(f"Best loss: {best_loss:.6f} at iteration {best_iteration}")
+
+    # Plot loss from iteration 500 to 5000
+    start_iter = 500
+    end_iter = min(5000, len(loss_values))
+    iterations_range = np.arange(start_iter, end_iter)
+    loss_to_plot = loss_values[start_iter:end_iter]
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(iterations_range, loss_to_plot, linewidth=0.8)
+    plt.xlabel("Iteration")
+    plt.ylabel("Loss")
+    plt.title("Training Loss (Iterations 500-5000)")
+    plt.grid(True, linestyle="--", alpha=0.7)
+    plt.axhline(
+        best_loss,
+        color="r",
+        linestyle="--",
+        linewidth=0.8,
+        label=f"Best: {best_loss:.4f} @ iter {best_iteration}",
+    )
+    plt.legend()
+
+    loss_outfile = os.path.join("results", "training_loss.png")
+    plt.savefig(loss_outfile, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"Saved loss plot to {loss_outfile}")
+else:
+    print(f"Warning: {loss_path} not found, skipping loss analysis.")
+
 # Load final weights
-final_weights_path = os.path.join("results", "PUSCH_autoencoder_weights_conventional_training")
-with open(final_weights_path, 'rb') as f:
+final_weights_path = os.path.join(
+    "results", "PUSCH_autoencoder_weights_conventional_training"
+)
+with open(final_weights_path, "rb") as f:
     final_weights = pickle.load(f)
 
 # Display correction scales
-if 'rx_weights' in final_weights:
-    rx_weights = final_weights['rx_weights']
+if "rx_weights" in final_weights:
+    rx_weights = final_weights["rx_weights"]
     # The scales are stored as: _h_correction_scale, _err_var_correction_scale_raw, _llr_correction_scale
     # rx_weights is a list where first 3 elements are the correction scales
     h_correction_scale = float(rx_weights[0])
     err_var_correction_scale_raw = float(rx_weights[1])
     llr_correction_scale = float(rx_weights[2])
-    
+
     # Apply softplus to err_var scale: softplus(x) = log(1 + exp(x))
     err_var_correction_scale = np.log(1 + np.exp(err_var_correction_scale_raw))
-    
+
     print(f"Correction scales:")
     print(f"  h_correction_scale: {h_correction_scale:.6f}")
     print(f"  err_var_correction_scale (softplus): {err_var_correction_scale:.6f}")
     print(f"  llr_correction_scale: {llr_correction_scale:.6f}")
 
 # tx_weights[0] = points_r, tx_weights[1] = points_i
-final_const = normalize_constellation(final_weights['tx_weights'][0], final_weights['tx_weights'][1])
+final_const = normalize_constellation(
+    final_weights["tx_weights"][0], final_weights["tx_weights"][1]
+)
 
 # Plot final constellation
 fig, ax = plt.subplots(figsize=(5, 5))
-ax.scatter(init_const.real, init_const.imag, s=40, marker='o', label='Standard 16-QAM')
-ax.scatter(final_const.real, final_const.imag, s=40, marker='x', label='Trained')
-ax.axhline(0, color='gray', linewidth=0.5)
-ax.axvline(0, color='gray', linewidth=0.5)
-ax.set_aspect('equal', 'box')
-ax.grid(True, linestyle='--', linewidth=0.5)
-ax.set_xlabel('In-phase')
-ax.set_ylabel('Quadrature')
-ax.set_title('Normalized Constellation: Standard vs Trained')
+ax.scatter(init_const.real, init_const.imag, s=40, marker="o", label="Standard 16-QAM")
+ax.scatter(final_const.real, final_const.imag, s=40, marker="x", label="Trained")
+ax.axhline(0, color="gray", linewidth=0.5)
+ax.axvline(0, color="gray", linewidth=0.5)
+ax.set_aspect("equal", "box")
+ax.grid(True, linestyle="--", linewidth=0.5)
+ax.set_xlabel("In-phase")
+ax.set_ylabel("Quadrature")
+ax.set_title("Normalized Constellation: Standard vs Trained")
 ax.legend()
 
 const_outfile = os.path.join("results", "constellation_normalized.png")
-fig.savefig(const_outfile, dpi=150, bbox_inches='tight')
+fig.savefig(const_outfile, dpi=150, bbox_inches="tight")
 plt.close(fig)
 print(f"Saved constellation plot to {const_outfile}")
 
@@ -126,30 +175,42 @@ print(f"Saved constellation plot to {const_outfile}")
 iterations = [1000, 2000, 3000, 4000]
 
 for iteration in iterations:
-    weights_path = os.path.join("results", f"PUSCH_autoencoder_weights_conventional_iter_{iteration}")
-    
+    weights_path = os.path.join(
+        "results", f"PUSCH_autoencoder_weights_conventional_iter_{iteration}"
+    )
+
     if not os.path.exists(weights_path):
         print(f"Warning: {weights_path} not found, skipping.")
         continue
-    
-    with open(weights_path, 'rb') as f:
+
+    with open(weights_path, "rb") as f:
         weights = pickle.load(f)
-    
-    trained_const = normalize_constellation(weights['tx_weights'][0], weights['tx_weights'][1])
-    
+
+    trained_const = normalize_constellation(
+        weights["tx_weights"][0], weights["tx_weights"][1]
+    )
+
     fig, ax = plt.subplots(figsize=(5, 5))
-    ax.scatter(init_const.real, init_const.imag, s=40, marker='o', label='Standard 16-QAM')
-    ax.scatter(trained_const.real, trained_const.imag, s=40, marker='x', label=f'Iter {iteration}')
-    ax.axhline(0, color='gray', linewidth=0.5)
-    ax.axvline(0, color='gray', linewidth=0.5)
-    ax.set_aspect('equal', 'box')
-    ax.grid(True, linestyle='--', linewidth=0.5)
-    ax.set_xlabel('In-phase')
-    ax.set_ylabel('Quadrature')
-    ax.set_title(f'Constellation at Iteration {iteration}')
+    ax.scatter(
+        init_const.real, init_const.imag, s=40, marker="o", label="Standard 16-QAM"
+    )
+    ax.scatter(
+        trained_const.real,
+        trained_const.imag,
+        s=40,
+        marker="x",
+        label=f"Iter {iteration}",
+    )
+    ax.axhline(0, color="gray", linewidth=0.5)
+    ax.axvline(0, color="gray", linewidth=0.5)
+    ax.set_aspect("equal", "box")
+    ax.grid(True, linestyle="--", linewidth=0.5)
+    ax.set_xlabel("In-phase")
+    ax.set_ylabel("Quadrature")
+    ax.set_title(f"Constellation at Iteration {iteration}")
     ax.legend()
-    
+
     iter_outfile = os.path.join("results", f"constellation_iter_{iteration}.png")
-    fig.savefig(iter_outfile, dpi=150, bbox_inches='tight')
+    fig.savefig(iter_outfile, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"Saved constellation plot to {iter_outfile}")

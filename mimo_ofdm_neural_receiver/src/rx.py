@@ -6,21 +6,33 @@ from sionna.phy.fec.ldpc import LDPC5GEncoder, LDPC5GDecoder
 from .config import Config
 from .csi import CSI
 
+
 class Rx:
     """
     Full receiver chain; uses the *shared* CSI.h_freq for UL perfect-CSI path.
     """
+
     def __init__(self, cfg: Config, csi: CSI):
         self._cfg = cfg
         self._csi = csi
 
         self._ce = LSChannelEstimator(self._cfg.rg, interpolation_type="nn")
         self._eq = LMMSEEqualizer(self._cfg.rg, self._cfg.sm)
-        self._demapper = Demapper("app", self._cfg.modulation, self._cfg.num_bits_per_symbol)
-        self._decoder = LDPC5GDecoder(LDPC5GEncoder(self._cfg.k, self._cfg.n), hard_out=True)
+        self._demapper = Demapper(
+            "app", self._cfg.modulation, self._cfg.num_bits_per_symbol
+        )
+        self._decoder = LDPC5GDecoder(
+            LDPC5GEncoder(self._cfg.k, self._cfg.n), hard_out=True
+        )
 
     @tf.function
-    def __call__(self, y: tf.Tensor, h_freq: tf.Tensor, no: tf.Tensor, g: Optional[tf.Tensor] = None) -> Dict[str, Any]:
+    def __call__(
+        self,
+        y: tf.Tensor,
+        h_freq: tf.Tensor,
+        no: tf.Tensor,
+        g: Optional[tf.Tensor] = None,
+    ) -> Dict[str, Any]:
 
         # Perfect vs estimated CSI
         if self._cfg.perfect_csi:
@@ -34,7 +46,14 @@ class Rx:
         llr = self._demapper(x_hat, no_eff)
         b_hat = self._decoder(llr)
 
-        return {"h_hat": h_hat, "err_var": err_var, "x_hat": x_hat, "no_eff": no_eff, "llr": llr, "b_hat": b_hat}
+        return {
+            "h_hat": h_hat,
+            "err_var": err_var,
+            "x_hat": x_hat,
+            "no_eff": no_eff,
+            "llr": llr,
+            "b_hat": b_hat,
+        }
 
 
 if __name__ == "__main__":
@@ -46,7 +65,9 @@ if __name__ == "__main__":
     from .rx import Rx
 
     def rand_cplx(shape, dtype=tf.float32):
-        return tf.complex(tf.random.normal(shape, dtype=dtype),tf.random.normal(shape, dtype=dtype))
+        return tf.complex(
+            tf.random.normal(shape, dtype=dtype), tf.random.normal(shape, dtype=dtype)
+        )
 
     # Setup
     cfg = Config(perfect_csi=True)
@@ -68,4 +89,3 @@ if __name__ == "__main__":
     print("\n[RX] Output shapes:")
     for k, v in out.items():
         print(f"{k:10s}: {v.shape}")
-

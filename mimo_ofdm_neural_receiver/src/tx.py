@@ -1,4 +1,5 @@
 import os
+
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "0"
 import tensorflow as tf
 from typing import Dict, Any, Optional
@@ -8,12 +9,14 @@ from sionna.phy.ofdm import ResourceGridMapper, RZFPrecoder
 from .config import Config
 from .csi import CSI
 
+
 class Tx:
     """
     Uses a shared CSI instance (composition) so Tx, Channel, Rx all see the SAME h_freq.
     Pipeline:
       BinarySource -> LDPC5GEncoder -> Mapper -> ResourceGridMapper -> (optional) RZFPrecoder
     """
+
     def __init__(self, cfg: Config, channel_coding_off: bool = False):
         self._cfg = cfg
         self._channel_coding_off = channel_coding_off
@@ -30,9 +33,13 @@ class Tx:
         # Bits -> code -> symbols -> RG
         b = None
         if self._channel_coding_off:
-            c = self._binary_source([batch_size, 1, self._num_streams_per_tx, self._cfg.n])
+            c = self._binary_source(
+                [batch_size, 1, self._num_streams_per_tx, self._cfg.n]
+            )
         else:
-            b = self._binary_source([batch_size, 1, self._num_streams_per_tx, self._cfg.k])
+            b = self._binary_source(
+                [batch_size, 1, self._num_streams_per_tx, self._cfg.k]
+            )
             c = self._encoder(b)
         x = self._mapper(c)
         x_rg = self._rg_mapper(x)

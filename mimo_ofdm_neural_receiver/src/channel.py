@@ -4,15 +4,19 @@ from sionna.phy.channel import ApplyOFDMChannel
 from .config import Config
 from .csi import CSI
 
+
 class Channel:
     """
     Apply the frequency-domain channel with AWGN.
     """
+
     def __init__(self):
         self._apply = ApplyOFDMChannel(add_awgn=True)
 
     @tf.function
-    def __call__(self, x_rg_tx: tf.Tensor, h_freq: tf.Tensor, no: tf.Tensor) -> Dict[str, Any]:
+    def __call__(
+        self, x_rg_tx: tf.Tensor, h_freq: tf.Tensor, no: tf.Tensor
+    ) -> Dict[str, Any]:
         y = self._apply(x_rg_tx, h_freq, no)
         return {"y": y}
 
@@ -36,7 +40,10 @@ if __name__ == "__main__":
 
     # Generate dummy transmitted resource grid
     x_shape = (B, cfg.rg.num_tx, cfg.rg.num_ofdm_symbols, cfg.rg.fft_size)
-    x_rg_tx = tf.complex(tf.random.normal(x_shape, dtype=tf.float32),tf.random.normal(x_shape, dtype=tf.float32))
+    x_rg_tx = tf.complex(
+        tf.random.normal(x_shape, dtype=tf.float32),
+        tf.random.normal(x_shape, dtype=tf.float32),
+    )
     no = ebnodb2no(EbNo_dB, cfg.num_bits_per_symbol, cfg.coderate, cfg.rg)
 
     y = channel(x_rg_tx, h_freq, no)

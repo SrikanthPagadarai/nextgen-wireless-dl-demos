@@ -29,5 +29,5 @@ y_out = ch(B, tx_out["x_rg_tx"], no)
 rx_out = rx(B, y_out["y"], no, g=tx_out["g"])
 
 # BER
-ber = compute_ber(tx_out['b'], rx_out['b_hat'])
+ber = compute_ber(tx_out["b"], rx_out["b_hat"])
 print("BER: {}".format(ber))

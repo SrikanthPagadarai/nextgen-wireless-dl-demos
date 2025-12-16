@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 import time
+
 start = time.time()
 
 # ----------------------------------------
@@ -32,10 +33,7 @@ channel_model = cir_manager.load_from_tfrecord(group_for_mumimo=True)
 # Instantiate and train the end-to-end system
 ebno_db_test = tf.fill([batch_size], 10.0)
 model = PUSCHLinkE2E(
-    channel_model,
-    perfect_csi=False,
-    use_autoencoder=True,
-    training=True
+    channel_model, perfect_csi=False, use_autoencoder=True, training=True
 )
 loss = model(batch_size, ebno_db_test)
 print("  Initial forward-pass loss:", loss.numpy())
@@ -90,8 +88,8 @@ n_tx = len(tx_vars)
 n_scales = len(rx_scale_vars)
 
 grads_tx = all_grads[:n_tx]
-grads_scales = all_grads[n_tx:n_tx + n_scales]
-grads_rx_nn = all_grads[n_tx + n_scales:]
+grads_scales = all_grads[n_tx : n_tx + n_scales]
+grads_rx_nn = all_grads[n_tx + n_scales :]
 
 print("\nTransmitter gradients:")
 for v, g in zip(tx_vars, grads_tx):
@@ -120,19 +118,13 @@ num_training_iterations = 5000
 
 # Learning rate schedules - scales get 100x higher LR
 lr_schedule_tx = tf.keras.optimizers.schedules.CosineDecay(
-    initial_learning_rate=1e-2,
-    decay_steps=num_training_iterations,
-    alpha=0.01
+    initial_learning_rate=1e-2, decay_steps=num_training_iterations, alpha=0.01
 )
 lr_schedule_scales = tf.keras.optimizers.schedules.CosineDecay(
-    initial_learning_rate=1e-2,
-    decay_steps=num_training_iterations,
-    alpha=0.01
+    initial_learning_rate=1e-2, decay_steps=num_training_iterations, alpha=0.01
 )
 lr_schedule_rx = tf.keras.optimizers.schedules.CosineDecay(
-    initial_learning_rate=1e-4,
-    decay_steps=num_training_iterations,
-    alpha=0.01
+    initial_learning_rate=1e-4, decay_steps=num_training_iterations, alpha=0.01
 )
 
 optimizer_tx = tf.keras.optimizers.Adam(learning_rate=lr_schedule_tx)
@@ -141,37 +133,38 @@ optimizer_rx = tf.keras.optimizers.Adam(learning_rate=lr_schedule_rx)
 
 accumulation_steps = 16
 
+
 @tf.function(jit_compile=False)
 def compute_grads_single():
     ebno_db = tf.random.uniform(
-        shape=[training_batch_size],
-        minval=ebno_db_min,
-        maxval=ebno_db_max
+        shape=[training_batch_size], minval=ebno_db_min, maxval=ebno_db_max
     )
     with tf.GradientTape() as tape:
         loss = model(training_batch_size, ebno_db)
     grads = tape.gradient(loss, all_vars)
     return loss, grads
 
+
 def compute_accumulated_grads():
     """Compute accumulated gradients without applying them."""
     accumulated_grads = [tf.zeros_like(v) for v in all_vars]
     total_loss = 0.0
-    
+
     for _ in range(accumulation_steps):
         loss, grads = compute_grads_single()
         accumulated_grads = [ag + g for ag, g in zip(accumulated_grads, grads)]
         total_loss += loss
-    
+
     # Average
     accumulated_grads = [g / accumulation_steps for g in accumulated_grads]
     avg_loss = total_loss / accumulation_steps
-    
+
     grads_tx = accumulated_grads[:n_tx]
-    grads_scales = accumulated_grads[n_tx:n_tx + n_scales]
-    grads_rx_nn = accumulated_grads[n_tx + n_scales:]
-    
+    grads_scales = accumulated_grads[n_tx : n_tx + n_scales]
+    grads_rx_nn = accumulated_grads[n_tx + n_scales :]
+
     return avg_loss, grads_tx, grads_scales, grads_rx_nn
+
 
 # store loss values for plotting
 loss_history = []
@@ -183,50 +176,55 @@ for i in range(num_training_iterations):
     avg_loss, grads_tx, grads_scales, grads_rx_nn = compute_accumulated_grads()
     loss_value = float(avg_loss.numpy())
     loss_history.append(loss_value)
-    
+
     if training_mode == "conventional":
         # Update all three groups every iteration
         optimizer_tx.apply_gradients(zip(grads_tx, tx_vars))
         optimizer_scales.apply_gradients(zip(grads_scales, rx_scale_vars))
         optimizer_rx.apply_gradients(zip(grads_rx_nn, nn_rx_vars))
-    
+
     elif training_mode == "two_phase":
         # 10 RX updates (with fresh gradients each time)
         for _ in range(10):
             _, _, grads_scales_fresh, grads_rx_nn_fresh = compute_accumulated_grads()
             optimizer_scales.apply_gradients(zip(grads_scales_fresh, rx_scale_vars))
             optimizer_rx.apply_gradients(zip(grads_rx_nn_fresh, nn_rx_vars))
-        
+
         # 1 TX update (with fresh gradient after RX has adapted)
         _, grads_tx_fresh, _, _ = compute_accumulated_grads()
         optimizer_tx.apply_gradients(zip(grads_tx_fresh, tx_vars))
-    
+
     print(
-        'Iteration {}/{}  BCE: {:.4f}'.format(
+        "Iteration {}/{}  BCE: {:.4f}".format(
             i + 1, num_training_iterations, loss_value
         ),
-        end='\r',
-        flush=True
+        end="\r",
+        flush=True,
     )
 
     # Save weights intermittently
     if (i + 1) % 1000 == 0:
         os.makedirs("results", exist_ok=True)
         save_path = os.path.join(
-            "results",
-            f"PUSCH_autoencoder_weights_{training_mode}_iter_{i + 1}"
+            "results", f"PUSCH_autoencoder_weights_{training_mode}_iter_{i + 1}"
         )
 
         # Get normalized constellation
-        normalized_const = model._pusch_transmitter.get_normalized_constellation().numpy()
+        normalized_const = (
+            model._pusch_transmitter.get_normalized_constellation().numpy()
+        )
         weights_dict = {
-            'tx_weights': [v.numpy() for v in model._pusch_transmitter.trainable_variables],
-            'rx_weights': [v.numpy() for v in model._pusch_receiver.trainable_variables],
-            'tx_names': [v.name for v in model._pusch_transmitter.trainable_variables],
-            'rx_names': [v.name for v in model._pusch_receiver.trainable_variables],
-            'normalized_constellation': normalized_const,
+            "tx_weights": [
+                v.numpy() for v in model._pusch_transmitter.trainable_variables
+            ],
+            "rx_weights": [
+                v.numpy() for v in model._pusch_receiver.trainable_variables
+            ],
+            "tx_names": [v.name for v in model._pusch_transmitter.trainable_variables],
+            "rx_names": [v.name for v in model._pusch_receiver.trainable_variables],
+            "normalized_constellation": normalized_const,
         }
-        with open(save_path, 'wb') as f:
+        with open(save_path, "wb") as f:
             pickle.dump(weights_dict, f)
         print(f"[Checkpoint] Saved weights at iteration {i + 1} -> {save_path}")
 
@@ -238,21 +236,25 @@ loss_path = os.path.join("results", f"{training_mode}_training_loss.npy")
 
 # Save weights
 np.save(loss_path, np.array(loss_history))
-weights_path = os.path.join("results", f"PUSCH_autoencoder_weights_{training_mode}_training")
+weights_path = os.path.join(
+    "results", f"PUSCH_autoencoder_weights_{training_mode}_training"
+)
 
 # Get normalized constellation
 normalized_const = model._pusch_transmitter.get_normalized_constellation().numpy()
 weights_dict = {
-    'tx_weights': [v.numpy() for v in model._pusch_transmitter.trainable_variables],
-    'rx_weights': [v.numpy() for v in model._pusch_receiver.trainable_variables],
-    'tx_names': [v.name for v in model._pusch_transmitter.trainable_variables],
-    'rx_names': [v.name for v in model._pusch_receiver.trainable_variables],
-    'normalized_constellation': normalized_const,
+    "tx_weights": [v.numpy() for v in model._pusch_transmitter.trainable_variables],
+    "rx_weights": [v.numpy() for v in model._pusch_receiver.trainable_variables],
+    "tx_names": [v.name for v in model._pusch_transmitter.trainable_variables],
+    "rx_names": [v.name for v in model._pusch_receiver.trainable_variables],
+    "normalized_constellation": normalized_const,
 }
-with open(weights_path, 'wb') as f:
+with open(weights_path, "wb") as f:
     pickle.dump(weights_dict, f)
 
-print(f"Saved {len(weights_dict['tx_weights'])} TX and {len(weights_dict['rx_weights'])} RX weight arrays")
+print(
+    f"Saved {len(weights_dict['tx_weights'])} TX and {len(weights_dict['rx_weights'])} RX weight arrays"
+)
 
 # Print final scale values
 print("\nFinal correction scales:")
@@ -297,20 +299,8 @@ fig, ax = plt.subplots(figsize=(5, 5))
 pts_init = const_init.numpy()
 pts_trained = const_trained.numpy()
 
-ax.scatter(
-    pts_init.real,
-    pts_init.imag,
-    s=25,
-    marker='o',
-    label='Initial'
-)
-ax.scatter(
-    pts_trained.real,
-    pts_trained.imag,
-    s=25,
-    marker='x',
-    label='Trained'
-)
+ax.scatter(pts_init.real, pts_init.imag, s=25, marker="o", label="Initial")
+ax.scatter(pts_trained.real, pts_trained.imag, s=25, marker="x", label="Trained")
 
 ax.axhline(0.0, linewidth=0.5)
 ax.axvline(0.0, linewidth=0.5)

@@ -4,6 +4,7 @@ import sionna as sn
 import pickle
 from pathlib import Path
 import matplotlib
+
 matplotlib.use("Agg")
 
 from src.system import System
@@ -29,17 +30,19 @@ with open(weight_file, "rb") as f:
     weights = pickle.load(f)
     eval_system.set_weights(weights)
 
+
 # mc_fun bound to eval_system
 @tf.function(
     reduce_retracing=True,
     input_signature=[
-        tf.TensorSpec([], tf.int32),    # scalar batch_size
+        tf.TensorSpec([], tf.int32),  # scalar batch_size
         tf.TensorSpec([], tf.float32),  # scalar ebno_db
     ],
 )
 def mc_fun(batch_size, ebno_db):
     ebno_vec = tf.fill([batch_size], ebno_db)  # expand to shape (B,)
     return eval_system(batch_size, ebno_vec)
+
 
 # Compute BER/BLER
 ebno_vec = np.arange(EBN0_DB_MIN, EBN0_DB_MAX, 1)

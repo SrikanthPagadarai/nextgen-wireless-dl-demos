@@ -1,6 +1,15 @@
 from importlib import import_module
 
-__all__ = ["Config", "CIRManager", "CIRGenerator", "PUSCHTrainableTransmitter", "PUSCHNeuralDetector", "PUSCHTrainableReceiver", "System"]
+__all__ = [
+    "Config",
+    "CIRManager",
+    "CIRGenerator",
+    "PUSCHTrainableTransmitter",
+    "PUSCHNeuralDetector",
+    "PUSCHTrainableReceiver",
+    "System",
+]
+
 
 def __getattr__(name):
     if name in __all__:

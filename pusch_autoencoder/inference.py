@@ -47,9 +47,9 @@ mode = sys.argv[1]
 # ---------------------------------------------------------------------------
 # Helper: build model, load weights, restore constellation
 # ---------------------------------------------------------------------------
-def load_model_weights(model: tf.keras.Model,
-                       weights_path: str,
-                       batch_size: int) -> bool:
+def load_model_weights(
+    model: tf.keras.Model, weights_path: str, batch_size: int
+) -> bool:
     """
     Build the model, load weights from a pickle file, and restore the
     trainable variables directly.
@@ -74,13 +74,13 @@ def load_model_weights(model: tf.keras.Model,
 
     # Load TX weights
     tx_vars = model._pusch_transmitter.trainable_variables
-    for var, arr in zip(tx_vars, weights_dict['tx_weights']):
+    for var, arr in zip(tx_vars, weights_dict["tx_weights"]):
         var.assign(arr)
     print(f"[INFO] Restored {len(tx_vars)} TX variables.")
 
     # Load RX weights
     rx_vars = model._pusch_receiver.trainable_variables
-    for var, arr in zip(rx_vars, weights_dict['rx_weights']):
+    for var, arr in zip(rx_vars, weights_dict["rx_weights"]):
         var.assign(arr)
     print(f"[INFO] Restored {len(rx_vars)} RX variables.")
 
@@ -107,7 +107,7 @@ num_ue_ant = _cfg.num_ue_ant
 num_time_steps = _cfg.num_time_steps
 
 cir_manager = CIRManager()
-# Same as training.py: use raw (a, tau) tensors from TFRecord. 
+# Same as training.py: use raw (a, tau) tensors from TFRecord.
 channel_model = cir_manager.load_from_tfrecord(group_for_mumimo=True)
 
 # ---------------------------------------------------------------------------
@@ -117,7 +117,7 @@ e2e_model = PUSCHLinkE2E(
     channel_model,
     perfect_csi=False,
     use_autoencoder=True,
-    training=False,   # inference mode, but architecture same as in training
+    training=False,  # inference mode, but architecture same as in training
 )  # :contentReference[oaicite:5]{index=5}
 
 # Select weights file based on mode
@@ -134,8 +134,7 @@ _ = load_model_weights(e2e_model, weights_path, batch_size)
 # ---------------------------------------------------------------------------
 ebno_db_test = tf.fill([batch_size], 10.0)  # vector, same shape as training
 b_test, b_hat_test = e2e_model(batch_size, ebno_db_test)
-print("Quick check shapes (autoencoder inference):",
-      b_test.shape, b_hat_test.shape)
+print("Quick check shapes (autoencoder inference):", b_test.shape, b_hat_test.shape)
 
 
 # ---------------------------------------------------------------------------
@@ -157,6 +156,7 @@ def ae_model_for_ber(batch_size, ebno_db):
 
     # Call your actual model
     return e2e_model(batch_size, ebno_vec)
+
 
 # ---------------------------------------------------------------------------
 # BER/BLER Simulation

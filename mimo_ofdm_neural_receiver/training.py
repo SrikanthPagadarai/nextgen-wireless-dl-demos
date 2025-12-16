@@ -9,8 +9,12 @@ from src.system import System
 
 # CLI
 parser = argparse.ArgumentParser(description="Train NeuralRx.")
-parser.add_argument("--iterations", type=int, default=10000, help="Train for N more iterations")
-parser.add_argument("--fresh", action="store_true", help="Start fresh (ignore checkpoint)")
+parser.add_argument(
+    "--iterations", type=int, default=10000, help="Train for N more iterations"
+)
+parser.add_argument(
+    "--fresh", action="store_true", help="Start fresh (ignore checkpoint)"
+)
 args = parser.parse_args()
 
 # GPU setup
@@ -64,6 +68,7 @@ if not args.fresh and latest:
 target_iteration = start_iteration + args.iterations
 print(f"Training from {start_iteration} to {target_iteration}")
 
+
 # Train step
 @tf.function(
     reduce_retracing=True,
@@ -81,6 +86,7 @@ def train_step(batch_size, ebno_vec):
         for g, w in zip(grads, system.trainable_variables)
     ]
     return loss, grads
+
 
 # Sanity: accumulation alignment
 if start_iteration % ACCUMULATION_STEPS != 0:

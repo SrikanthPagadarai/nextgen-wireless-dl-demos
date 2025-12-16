@@ -9,20 +9,20 @@ class PUSCHTrainableReceiver(PUSCHReceiver):
     1. Returns LLRs before TB decoding in training mode
     2. Passes trainable constellation to the neural detector for proper demapping
     """
-    
+
     def __init__(self, *args, training=False, pusch_transmitter=None, **kwargs):
         self._training = training
         self._pusch_transmitter = pusch_transmitter
-        
+
         # Pass pusch_transmitter to parent
         super().__init__(*args, pusch_transmitter=pusch_transmitter, **kwargs)
 
     @property
     def trainable_variables(self):
-        if hasattr(self._mimo_detector, 'trainable_variables'):
+        if hasattr(self._mimo_detector, "trainable_variables"):
             return self._mimo_detector.trainable_variables
         return []
-    
+
     def _get_normalized_constellation(self):
         """Get normalized constellation points from transmitter."""
         if self._pusch_transmitter is not None:
@@ -51,7 +51,9 @@ class PUSCHTrainableReceiver(PUSCHReceiver):
         # MIMO Detection - pass constellation for proper demapping
         constellation = self._get_normalized_constellation()
         if constellation is not None:
-            llr = self._mimo_detector(y, h_hat, err_var, no, constellation=constellation)
+            llr = self._mimo_detector(
+                y, h_hat, err_var, no, constellation=constellation
+            )
         else:
             llr = self._mimo_detector(y, h_hat, err_var, no)
 

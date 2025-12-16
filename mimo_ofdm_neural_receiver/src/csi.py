@@ -1,4 +1,5 @@
 import os
+
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "0"
 
 import sionna.phy
@@ -7,6 +8,7 @@ from sionna.phy.channel.tr38901 import CDL, AntennaArray
 from sionna.phy.ofdm import ResourceGrid, RemoveNulledSubcarriers
 from sionna.phy.channel import subcarrier_frequencies, cir_to_ofdm_channel
 from .config import Config
+
 
 class CSI:
     """
@@ -30,7 +32,7 @@ class CSI:
         # Antenna arrays
         self._ut_array = AntennaArray(
             num_rows=1,
-            num_cols=int(self.cfg.num_ut_ant/2),
+            num_cols=int(self.cfg.num_ut_ant / 2),
             polarization="dual",
             polarization_type="cross",
             antenna_pattern="38.901",
@@ -38,7 +40,7 @@ class CSI:
         )
         self._bs_array = AntennaArray(
             num_rows=1,
-            num_cols=int(self.cfg.num_bs_ant/2),
+            num_cols=int(self.cfg.num_bs_ant / 2),
             polarization="dual",
             polarization_type="cross",
             antenna_pattern="38.901",
@@ -57,7 +59,9 @@ class CSI:
         )
 
         # Subcarrier frequencies for mapping CIR -> H(f)
-        self._frequencies = subcarrier_frequencies(self.cfg.rg.fft_size, self.cfg.rg.subcarrier_spacing)
+        self._frequencies = subcarrier_frequencies(
+            self.cfg.rg.fft_size, self.cfg.rg.subcarrier_spacing
+        )
 
         # For perfect UL-CSI
         self.remove_nulled_scs = RemoveNulledSubcarriers(self.cfg.rg)
