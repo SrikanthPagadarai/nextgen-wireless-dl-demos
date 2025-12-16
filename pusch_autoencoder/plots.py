@@ -84,6 +84,23 @@ final_weights_path = os.path.join("results", "PUSCH_autoencoder_weights_conventi
 with open(final_weights_path, 'rb') as f:
     final_weights = pickle.load(f)
 
+# Display correction scales
+if 'rx_weights' in final_weights:
+    rx_weights = final_weights['rx_weights']
+    # The scales are stored as: _h_correction_scale, _err_var_correction_scale_raw, _llr_correction_scale
+    # rx_weights is a list where first 3 elements are the correction scales
+    h_correction_scale = float(rx_weights[0])
+    err_var_correction_scale_raw = float(rx_weights[1])
+    llr_correction_scale = float(rx_weights[2])
+    
+    # Apply softplus to err_var scale: softplus(x) = log(1 + exp(x))
+    err_var_correction_scale = np.log(1 + np.exp(err_var_correction_scale_raw))
+    
+    print(f"Correction scales:")
+    print(f"  h_correction_scale: {h_correction_scale:.6f}")
+    print(f"  err_var_correction_scale (softplus): {err_var_correction_scale:.6f}")
+    print(f"  llr_correction_scale: {llr_correction_scale:.6f}")
+
 # tx_weights[0] = points_r, tx_weights[1] = points_i
 final_const = normalize_constellation(final_weights['tx_weights'][0], final_weights['tx_weights'][1])
 
@@ -109,7 +126,7 @@ print(f"Saved constellation plot to {const_outfile}")
 iterations = [1000, 2000, 3000, 4000]
 
 for iteration in iterations:
-    weights_path = os.path.join("results", f"PUSCH_autoencoder_weights_conv_iter_{iteration}")
+    weights_path = os.path.join("results", f"PUSCH_autoencoder_weights_conventional_iter_{iteration}")
     
     if not os.path.exists(weights_path):
         print(f"Warning: {weights_path} not found, skipping.")

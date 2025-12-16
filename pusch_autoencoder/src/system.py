@@ -15,7 +15,7 @@ from .pusch_trainable_receiver import PUSCHTrainableReceiver
 
 class PUSCHLinkE2E(tf.keras.Model):
     def __init__(self, channel_model, perfect_csi, use_autoencoder=False, training=False, 
-                 const_reg_weight=0.1, const_d_min=0.25):
+                 const_reg_weight=0.1, const_d_min=0.35):
         super().__init__()
 
         self._training = training
@@ -82,9 +82,9 @@ class PUSCHLinkE2E(tf.keras.Model):
         stream_management = StreamManagement(rx_tx_association,self._num_layers)
 
         if self._use_autoencoder:
-            detector = PUSCHNeuralDetector(self._cfg)
+            self._detector = PUSCHNeuralDetector(self._cfg)
         else:
-            detector = LinearDetector(
+            self._detector = LinearDetector(
                 equalizer="lmmse",
                 output="bit",
                 demapping_method="maxlog",
@@ -96,7 +96,7 @@ class PUSCHLinkE2E(tf.keras.Model):
 
         # configure receiver
         receiver = PUSCHTrainableReceiver if self._use_autoencoder else PUSCHReceiver
-        receiver_kwargs = {"mimo_detector": detector,"input_domain": self._domain, "pusch_transmitter": self._pusch_transmitter}
+        receiver_kwargs = {"mimo_detector": self._detector,"input_domain": self._domain, "pusch_transmitter": self._pusch_transmitter}
 
         # perfect/imperfect CSI
         if self._perfect_csi:
@@ -187,7 +187,7 @@ class PUSCHLinkE2E(tf.keras.Model):
             else:
                 llr = self._pusch_receiver(y, no)
             
-            # Detection loss (BCE)
+            # BCE
             bce_loss = self._bce(c, llr)
             
             # Constellation regularization loss to prevent collapse
@@ -216,7 +216,7 @@ def min_distance_loss(points_r, points_i, d_min=0.4, margin=0.1):
     
     This is the most effective regularizer to prevent collapse.
     For 16-QAM with unit average power, the nominal minimum distance
-    is approximately 2/sqrt(10) ≈ 0.632. Setting d_min=0.4 gives some
+    is approximately 2/sqrt(10) or 0.632. Setting d_min=0.4 gives some
     flexibility while preventing full collapse to QPSK.
     
     Args:
