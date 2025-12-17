@@ -6,7 +6,7 @@ Deep learning demos for B5G/6G wireless systems using TensorFlow and [Sionna](ht
 
 ## Overview
 
-This repository contains implementations of neural network-based systems for 5G/6G OFDM systems:
+This repository contains the following neural network-based demos for 5G/6G communication systems:
 
 - **mimo_ofdm_neural_receiver** — Neural receiver for a MIMO-OFDM system
 - **pusch_autoencoder** — Site-specific autoencoder design for 5G PUSCH

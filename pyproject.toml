@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "sionna-dl-6g"
+name = "sionna-dl-6g-demos"
 version = "0.1.0"
 description = "Deep Learning Demos for B5G/6G Using TensorFlow and Sionna"
 authors = ["Srikanth Pagadarai <srikanth.pagadarai@gmail.com>"]
