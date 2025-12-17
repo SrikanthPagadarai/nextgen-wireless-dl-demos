@@ -1,4 +1,6 @@
-# sionna-dl-6g
+# [Work-In-Progress] sionna-dl-6g
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Deep learning demos for B5G/6G wireless systems using TensorFlow and [Sionna](https://nvlabs.github.io/sionna/).
 
