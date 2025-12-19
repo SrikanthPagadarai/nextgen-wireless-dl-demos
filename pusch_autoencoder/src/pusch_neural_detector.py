@@ -36,16 +36,26 @@ class Conv2DResBlock(Layer):
 
 class PUSCHNeuralDetector(Layer):
     """
-    Merged joint CE + detection network with shared backbone and trainable correction scales.
+    LS channel estimator refinement using a NN
+    followed by
+    traditional LMMSE detection and demapping using refined channel estimator
+    followed by
+    LLR refinement using a NN
 
     Architecture:
-        1. Shared backbone: processes input features (h_ls, y, z_mf, gram, err_var, no)
-        2. CE head: lightweight projection from shared features -> delta_h, delta_loge
-        3. Apply scaled corrections: h_refined = h + scale_h * delta_h
-                                     err_var_refined = exp(log(err_var) + scale_e * delta_loge)
-        4. LMMSE: equalization using refined (h, err_var)
-        5. Detection continuation: injects LMMSE output into shared features -> llr_correction
-        6. Final LLR: llr_lmmse + scale_llr * llr_correction
+        1. Shared backbone:
+           processes input features (h_ls, y, z_mf, gram, err_var, no)
+        2. CE head:
+           lightweight projection from shared features -> delta_h, delta_loge
+        3. Apply scaled corrections:
+           h_refined = h + scale_h * delta_h
+           err_var_refined = exp(log(err_var) + scale_e * delta_loge)
+        4. LMMSE:
+           equalization using refined (h, err_var)
+        5. Detection refinement:
+           inject LMMSE output into shared features -> llr_correction
+        6. Final LLR:
+           llr_lmmse + scale_llr * llr_correction
 
     Trainable correction scales:
         - _h_correction_scale: unbounded, controls channel estimate refinement
@@ -58,7 +68,7 @@ class PUSCHNeuralDetector(Layer):
         cfg: Config,
         num_conv2d_filters: int = 128,
         num_shared_res_blocks: int = 4,
-        num_det_res_blocks: int = 4,
+        num_det_res_blocks: int = 6,
         kernel_size=(3, 3),
     ):
         super().__init__()
@@ -95,18 +105,18 @@ class PUSCHNeuralDetector(Layer):
         self._demapper = Demapper("maxlog", constellation=self._constellation)
 
         # ===== Trainable correction scales =====
-        # h and llr scales: unbounded, initialized to 0.3
+        # h and llr scales: unbounded, initialized to 0.0
         self._h_correction_scale = tf.Variable(
-            0.3, trainable=True, name="h_correction_scale", dtype=tf.float32
+            0.0, trainable=True, name="h_correction_scale", dtype=tf.float32
         )
         self._llr_correction_scale = tf.Variable(
-            0.3, trainable=True, name="llr_correction_scale", dtype=tf.float32
+            0.0, trainable=True, name="llr_correction_scale", dtype=tf.float32
         )
         # err_var scale: softplus-transformed to ensure positive
-        # Initialize raw value so that softplus(raw) = (approximately) 0.3
-        # softplus(x) = log(1 + exp(x)), solving for softplus(x) = 0.3 gives x = (approximately) -1.05
+        # Initialize x value so that softplus(x) = 1.0
+        # softplus(x) = log(1 + exp(x)), i.e., softplus(x) = 1.0 gives x = 0.0
         self._err_var_correction_scale_raw = tf.Variable(
-            -1.05, trainable=True, name="err_var_correction_scale_raw", dtype=tf.float32
+            0.0, trainable=True, name="err_var_correction_scale_raw", dtype=tf.float32
         )
 
         # ===== Input feature dimensions =====
@@ -139,12 +149,16 @@ class PUSCHNeuralDetector(Layer):
             for i in range(self.num_shared_res_blocks)
         ]
 
-        # ===== CE Head (lightweight) =====
-        self._ce_head_conv1 = Conv2D(
-            filters=self.num_conv2d_filters,
-            kernel_size=(3, 3),
-            padding="same",
-            activation=None,
+        # CE Head NN
+        self._ce_head_conv1 = tf.keras.Sequential(
+            [
+                Conv2D(self.num_conv2d_filters, (3, 3), padding="same"),
+                LayerNormalization(axis=-1),
+                tf.keras.layers.LeakyReLU(0.1),
+                Conv2D(self.num_conv2d_filters, (3, 3), padding="same"),
+                LayerNormalization(axis=-1),
+                tf.keras.layers.LeakyReLU(0.1),
+            ],
             name="ce_head_conv1",
         )
         # delta_h output: real/imag for all (rx_ant, stream) entries
@@ -232,7 +246,9 @@ class PUSCHNeuralDetector(Layer):
         return vars_
 
     def _reshape_logits_to_llr(self, logits, num_data_symbols):
-        """Reshape [B, H, W, S*bits] -> [B, num_ue, streams_per_ue, num_data_symbols*bits]"""
+        """
+        Reshape [B, H, W, S*bits] -> [B, num_ue, streams_per_ue, num_data_symbols*bits]
+        """
         B = tf.shape(logits)[0]
         logits = tf.reshape(
             logits,
@@ -266,11 +282,15 @@ class PUSCHNeuralDetector(Layer):
         Forward pass with merged backbone and trainable correction scales.
 
         Args:
-            y: [B, num_bs, num_bs_ant, num_ofdm_symbols, num_subcarriers] complex
-            h_hat: [B, num_bs, num_bs_ant, num_ue, num_streams, num_ofdm_symbols, num_subcarriers] complex
-            err_var: [B, 1, 1, num_ue, num_streams, num_ofdm_symbols, num_subcarriers] float
+            y: complex
+            [B, num_bs, num_bs_ant, num_ofdm_syms, num_subcarriers]
+            h_hat: complex
+            [B, num_bs, num_bs_ant, num_ue, num_streams, num_ofdm_syms, num_subcarriers]
+            err_var: float
+            [B, 1, 1, num_ue, num_streams, num_ofdm_syms, num_subcarriers]
             no: [B] or scalar, noise variance
-            constellation: [num_points] complex, optional trainable constellation points
+            constellation: complex, optional trainable constellation points
+            [num_points]
             training: bool, training mode flag
 
         Returns:
@@ -286,16 +306,13 @@ class PUSCHNeuralDetector(Layer):
         if constellation is not None:
             self._constellation.points = tf.cast(constellation, tf.complex64)
 
-        # ===== Mask pilots (keep data REs only) =====
+        # Indices for data-only slicing (to be done after channel estimation refinement)
         data_idx = tf.constant(self._data_symbol_indices, dtype=tf.int32)
-        y = tf.gather(y, data_idx, axis=3)
-        h_hat = tf.gather(h_hat, data_idx, axis=5)
-        err_var = tf.gather(err_var, data_idx, axis=5)
 
+        # Use FULL symbol grid for CE refinement (pilots + data)
         B = tf.shape(y)[0]
-        H = tf.shape(y)[3]  # num_data_ofdm_symbols
+        H = tf.shape(y)[3]  # num_ofdm_syms (incl pilots)
         W = tf.shape(y)[4]  # num_subcarriers
-        num_data_symbols = H * W
 
         S = self._num_streams_total
         Nr = self._num_rx_ant
@@ -424,19 +441,33 @@ class PUSCHNeuralDetector(Layer):
         self.last_err_var_refined_flat = tf.cast(err_var_flat_refined, tf.float32)
 
         # ===== LMMSE Equalization =====
+        # Slice to DATA symbols only for detection
+        y_flat_data = tf.gather(y_flat, data_idx, axis=1)  # [B, H_data, W, Nr]
+        shared_features_data = tf.gather(
+            shared_features, data_idx, axis=1
+        )  # [B, H_data, W, F]
+        h_flat_refined_data = tf.gather(
+            h_flat_refined, data_idx, axis=1
+        )  # [B, H_data, W, Nr, S]
+        err_var_flat_refined_data = tf.gather(
+            err_var_flat_refined, data_idx, axis=1
+        )  # [B, H_data, W, S]
+
+        H_data = tf.shape(y_flat_data)[1]
+        num_data_symbols = H_data * W
+
         # Build noise covariance matrix
         no_expanded = no[:, tf.newaxis, tf.newaxis]
-        avg_err_var = tf.reduce_mean(err_var_flat_refined, axis=-1)
-        total_noise_var = no_expanded + avg_err_var
-        eye = tf.eye(Nr, dtype=tf.complex64)
-        eye = eye[tf.newaxis, tf.newaxis, tf.newaxis, :, :]
-        s_cov = (
+        sum_err_var = tf.reduce_sum(err_var_flat_refined_data, axis=-1)
+        total_noise_var = no_expanded + sum_err_var
+        eye = tf.eye(Nr, dtype=tf.complex64)[tf.newaxis, tf.newaxis, tf.newaxis, :, :]
+        s_cov_data = (
             tf.cast(total_noise_var[..., tf.newaxis, tf.newaxis], tf.complex64) * eye
         )
 
         # LMMSE equalization
         x_lmmse, no_eff = lmmse_equalizer(
-            y_flat, h_flat_refined, s_cov, whiten_interference=True
+            y_flat_data, h_flat_refined_data, s_cov_data, whiten_interference=True
         )
         # x_lmmse: [B, H, W, S], no_eff: [B, H, W, S]
 
@@ -444,8 +475,10 @@ class PUSCHNeuralDetector(Layer):
         x_lmmse_flat_dm = tf.reshape(x_lmmse, [-1])
         no_eff_flat_dm = tf.reshape(no_eff, [-1])
         llr_lmmse_flat = self._demapper(x_lmmse_flat_dm, no_eff_flat_dm)
-        llr_lmmse = tf.reshape(llr_lmmse_flat, [B, H, W, S, self._num_bits_per_symbol])
-        llr_lmmse = tf.reshape(llr_lmmse, [B, H, W, S * self._num_bits_per_symbol])
+        llr_lmmse = tf.reshape(
+            llr_lmmse_flat, [B, H_data, W, S, self._num_bits_per_symbol]
+        )
+        llr_lmmse = tf.reshape(llr_lmmse, [B, H_data, W, S * self._num_bits_per_symbol])
 
         # ===== Build LMMSE features for detection continuation =====
         x_lmmse_feats = tf.concat(
@@ -465,7 +498,7 @@ class PUSCHNeuralDetector(Layer):
 
         # ===== Detection Continuation =====
         # Concatenate shared features with LMMSE features
-        combined_features = tf.concat([shared_features, lmmse_features], axis=-1)
+        combined_features = tf.concat([shared_features_data, lmmse_features], axis=-1)
 
         # Injection conv to fuse and reduce dimensions
         det_features = self._det_inject_conv(combined_features)

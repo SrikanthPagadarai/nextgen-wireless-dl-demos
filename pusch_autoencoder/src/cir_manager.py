@@ -372,8 +372,19 @@ class CIRManager:
             tfrecord_dir: Directory containing TFRecord files
 
         Returns:
-            all_a: Concatenated CIR coefficients with shape [num_samples, 1, num_rx_ant, num_ue, num_tx_ant, num_paths, num_time_steps]
-            all_tau: Concatenated delay values with shape [num_samples, 1, num_ue, num_paths]
+            all_a: Concatenated CIR coefficients with shape
+                [num_samples,
+                1,
+                num_rx_ant,
+                num_ue,
+                num_tx_ant,
+                num_paths,
+                num_time_steps]
+            all_tau: Concatenated delay values with shape
+                [num_samples,
+                1,
+                num_ue,
+                num_paths]
         """
         cir_dir = os.path.join(os.path.dirname(__file__), tfrecord_dir)
         cir_files = tf.io.gfile.glob(os.path.join(cir_dir, "*.tfrecord"))
@@ -422,6 +433,7 @@ class CIRManager:
         if group_for_mumimo:
             # Group num_ue individual CIRs into MU-MIMO samples
             num_ue = self.num_ue  # 4
+            num_bs_ant = self.num_bs_ant
             num_samples = tf.shape(all_a)[0]
             num_mu_samples = num_samples // num_ue
 
@@ -430,7 +442,9 @@ class CIRManager:
             all_tau = all_tau[: num_mu_samples * num_ue]
 
             # a: [N*4, 1, 16, 1, 4, 51, 14] -> [N, 1, 16, 4, 4, 51, 14]
-            all_a = tf.reshape(all_a, [num_mu_samples, num_ue, 1, 16, 1, 4, 51, 14])
+            all_a = tf.reshape(
+                all_a, [num_mu_samples, num_ue, 1, num_bs_ant, 1, 4, 51, 14]
+            )
             all_a = tf.squeeze(all_a, axis=4)  # [N, 4, 1, 16, 4, 51, 14]
             all_a = tf.transpose(
                 all_a, [0, 2, 3, 1, 4, 5, 6]
@@ -552,7 +566,8 @@ class CIRManager:
         # To keep behavior simple, we’ll just mark that we still need to save it.
         need_ue_viz = save_radio_map
 
-        # Make output directory relative to this file, consistent with load_from_tfrecord
+        # Make output directory relative to this file,
+        # consistent with load_from_tfrecord
         base_dir = os.path.dirname(__file__)
         cir_dir = os.path.join(base_dir, tfrecord_dir)
         os.makedirs(cir_dir, exist_ok=True)
