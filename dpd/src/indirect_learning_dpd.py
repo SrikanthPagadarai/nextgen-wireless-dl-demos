@@ -42,21 +42,23 @@ class IndirectLearningDPD(tf.keras.layers.Layer):
 
     def __init__(self, params=None, **kwargs):
         super().__init__(**kwargs)
-
         p = {**self.DEFAULT_PARAMS, **(params or {})}
 
         if p["order"] % 2 == 0:
             raise ValueError("Order of the DPD must be odd.")
 
-        self._order = p["order"]
-        self._memory_depth = p["memory_depth"]
-        self._lag_depth = p["lag_depth"]
-        self._nIterations = p["nIterations"]
-        self._learning_rate = p["learning_rate"]
+        self._order, self._memory_depth, self._lag_depth = (
+            p["order"],
+            p["memory_depth"],
+            p["lag_depth"],
+        )
+        self._nIterations, self._learning_rate = p["nIterations"], p["learning_rate"]
         self._learning_method = p["learning_method"]
-        self._use_even = p["use_even"]
-        self._use_conj = p["use_conj"]
-        self._use_dc_term = p["use_dc_term"]
+        self._use_even, self._use_conj, self._use_dc_term = (
+            p["use_even"],
+            p["use_conj"],
+            p["use_dc_term"],
+        )
 
         if self._use_even:
             assert (
@@ -64,17 +66,10 @@ class IndirectLearningDPD(tf.keras.layers.Layer):
             ), "GMP not yet supported for even terms. Set lag_depth=0"
 
         self._n_coeffs = self._compute_n_coeffs()
-
-        # Will be initialized in build()
-        self._coeffs = None
-        self.coeff_history = None
-        self.result_history = None
+        self._coeffs, self.coeff_history, self.result_history = None, None, None
 
     def build(self, input_shape):
         """Build layer - create trainable weights."""
-        # Initialize coefficients using add_weight for proper Keras tracking
-        # First coefficient is 1, rest are 0
-        # We store real and imaginary parts separately for proper gradient flow
         init_real = np.zeros((self._n_coeffs, 1), dtype=np.float32)
         init_real[0, 0] = 1.0
         init_imag = np.zeros((self._n_coeffs, 1), dtype=np.float32)
@@ -93,7 +88,6 @@ class IndirectLearningDPD(tf.keras.layers.Layer):
             trainable=True,
             dtype=tf.float32,
         )
-
         super().build(input_shape)
 
     @property
@@ -131,48 +125,45 @@ class IndirectLearningDPD(tf.keras.layers.Layer):
         """Compute total number of DPD coefficients."""
         n_order = self._order if self._use_even else (self._order + 1) // 2
         n = n_order * self._memory_depth
-
         if not self._use_even:
             n += 2 * (n_order - 1) * self._memory_depth * self._lag_depth
-
         if self._use_conj:
             n *= 2
         if self._use_dc_term:
             n += 1
-
         return n
+
+    def _delay_signal(self, signal, delay):
+        """Apply delay to signal by prepending zeros."""
+        if delay == 0:
+            return signal
+        padding = tf.zeros(delay, dtype=signal.dtype)
+        return tf.concat([padding, signal[:-delay]], axis=0)
+
+    def _add_memory_columns(self, columns, branch):
+        """Add delayed versions of branch for all memory depths."""
+        for delay in range(self._memory_depth):
+            columns.append(self._delay_signal(branch, delay))
 
     def setup_basis_matrix(self, x):
         """
-        Build GMP basis matrix for 1D input.
-
-        This method is fully differentiable.
+        Build GMP basis matrix for 1D input. Fully differentiable.
 
         Args:
             x: [num_samples] complex tensor
-
         Returns:
             [num_samples, n_coeffs] complex tensor
         """
-        x = tf.reshape(x, [-1])
-        x = tf.cast(x, tf.complex64)
-
+        x = tf.cast(tf.reshape(x, [-1]), tf.complex64)
         n_samples = tf.shape(x)[0]
+        abs_x = tf.abs(x)
         step = 1 if self._use_even else 2
         columns = []
-        abs_x = tf.abs(x)
 
         # Main memory polynomial branch
         for order in range(1, self._order + 1, step):
-            abs_power = tf.pow(abs_x, order - 1)
-            branch = x * tf.cast(abs_power, tf.complex64)
-            for delay in range(self._memory_depth):
-                if delay == 0:
-                    delayed = branch
-                else:
-                    padding = tf.zeros(delay, dtype=tf.complex64)
-                    delayed = tf.concat([padding, branch[:-delay]], axis=0)
-                columns.append(delayed)
+            branch = x * tf.cast(tf.pow(abs_x, order - 1), tf.complex64)
+            self._add_memory_columns(columns, branch)
 
         # Lagging cross-terms
         for order in range(3, self._order + 1, step):
@@ -182,13 +173,7 @@ class IndirectLearningDPD(tf.keras.layers.Layer):
                     [tf.zeros(lag, dtype=tf.float32), abs_base[:-lag]], axis=0
                 )
                 branch = x * tf.cast(lagged_abs, tf.complex64)
-                for delay in range(self._memory_depth):
-                    if delay == 0:
-                        delayed = branch
-                    else:
-                        padding = tf.zeros(delay, dtype=tf.complex64)
-                        delayed = tf.concat([padding, branch[:-delay]], axis=0)
-                    columns.append(delayed)
+                self._add_memory_columns(columns, branch)
 
         # Leading cross-terms
         for order in range(3, self._order + 1, step):
@@ -198,144 +183,82 @@ class IndirectLearningDPD(tf.keras.layers.Layer):
                     [abs_base[lead:], tf.zeros(lead, dtype=tf.float32)], axis=0
                 )
                 branch = x * tf.cast(lead_abs, tf.complex64)
-                for delay in range(self._memory_depth):
-                    if delay == 0:
-                        delayed = branch
-                    else:
-                        padding = tf.zeros(delay, dtype=tf.complex64)
-                        delayed = tf.concat([padding, branch[:-delay]], axis=0)
-                    columns.append(delayed)
+                self._add_memory_columns(columns, branch)
 
         # Conjugate branch
         if self._use_conj:
             for order in range(1, self._order + 1, step):
-                abs_power = tf.pow(abs_x, order - 1)
-                branch = tf.math.conj(x) * tf.cast(abs_power, tf.complex64)
-                for delay in range(self._memory_depth):
-                    if delay == 0:
-                        delayed = branch
-                    else:
-                        padding = tf.zeros(delay, dtype=tf.complex64)
-                        delayed = tf.concat([padding, branch[:-delay]], axis=0)
-                    columns.append(delayed)
+                branch = tf.math.conj(x) * tf.cast(
+                    tf.pow(abs_x, order - 1), tf.complex64
+                )
+                self._add_memory_columns(columns, branch)
 
         # DC term
         if self._use_dc_term:
             columns.append(tf.ones(n_samples, dtype=tf.complex64))
 
-        X = tf.stack(columns, axis=1)
-        return X
+        return tf.stack(columns, axis=1)
 
     def predistort(self, x):
         """
-        Apply predistortion to input signal.
-
-        This method is fully differentiable.
+        Apply predistortion to input signal. Fully differentiable.
 
         Args:
             x: [num_samples] or [B, num_samples] tensor
-
         Returns:
             Same shape as input - predistorted signal
         """
-        # Ensure layer is built
         if not self.built:
             self.build(x.shape)
 
-        input_shape = tf.shape(x)
-        input_ndims = len(x.shape)
-
-        # Get complex coefficients
+        input_shape, input_ndims = tf.shape(x), len(x.shape)
         coeffs = self.coeffs
 
         if input_ndims == 1:
-            # 1D input
             X = self.setup_basis_matrix(x)
             return tf.reshape(tf.linalg.matmul(X, coeffs), [-1])
         elif input_ndims == 2:
-            # Batched input [B, N] - flatten, process, reshape
-            batch_size = input_shape[0]
-            samples_per_batch = input_shape[1]
-
-            x_flat = tf.reshape(x, [-1])
-            X = self.setup_basis_matrix(x_flat)
+            batch_size, samples_per_batch = input_shape[0], input_shape[1]
+            X = self.setup_basis_matrix(tf.reshape(x, [-1]))
             y_flat = tf.reshape(tf.linalg.matmul(X, coeffs), [-1])
-
             return tf.reshape(y_flat, [batch_size, samples_per_batch])
         else:
             raise ValueError(f"Input must be 1D or 2D, got shape {x.shape}")
 
     def call(self, x, training=None):
-        """
-        Keras layer call - applies predistortion.
-
-        This makes the layer usable in Keras Sequential/Functional models
-        and compatible with Sionna pipelines.
-
-        Args:
-            x: Input tensor [num_samples] or [B, num_samples]
-            training: Boolean or None. Whether the layer is in training mode.
-                     Not used in this layer but included for Keras/Sionna compatibility.
-
-        Returns:
-            Predistorted signal with same shape as input
-        """
+        """Keras layer call - applies predistortion."""
         return self.predistort(x)
 
     def _ls_estimation(self, X, y):
         """Regularized least-squares estimation."""
         start = self._memory_depth + self._lag_depth - 1
         end = -self._lag_depth if self._lag_depth > 0 else None
-
-        if end is None:
-            X_slice = X[start:]
-            y_slice = y[start:]
-        else:
-            X_slice = X[start:end]
-            y_slice = y[start:end]
-
-        y_slice = tf.reshape(y_slice, [-1, 1])
+        X_slice, y_slice = X[start:end], tf.reshape(y[start:end], [-1, 1])
 
         lam = tf.constant(0.001, dtype=tf.float32)
         XH = tf.linalg.adjoint(X_slice)
         XHX = tf.linalg.matmul(XH, X_slice)
         reg = tf.cast(lam * tf.eye(tf.shape(XHX)[0]), dtype=tf.complex64)
-        XHy = tf.linalg.matmul(XH, y_slice)
+        return tf.linalg.solve(XHX + reg, tf.linalg.matmul(XH, y_slice))
 
-        beta = tf.linalg.solve(XHX + reg, XHy)
-        return beta
-
-    def perform_learning(self, x, pa, verbose=True):
+    def perform_learning(self, x, pa, verbose=False):
         """
         Perform iterative DPD learning using indirect learning architecture.
-
-        This method uses LS estimation to learn DPD coefficients.
-        For batched input, signal is flattened for learning to ensure
-        consistent coefficient estimation across all batches.
 
         Args:
             x: [num_samples] or [B, num_samples] input tensor (at PA sample rate)
             pa: PowerAmplifier instance
             verbose: Print progress (default: True)
-
         Returns:
             Dictionary with learning results
         """
-        # Ensure layer is built
         if not self.built:
             self.build(x.shape)
 
-        # Flatten if batched for consistent learning
-        input_ndims = len(x.shape)
-        input_shape = tf.shape(x)
-
-        if input_ndims == 2:
-            batch_size = input_shape[0]
-            samples_per_batch = input_shape[1]
-            x_flat = tf.reshape(x, [-1])
-        else:
-            batch_size = 1
-            x_flat = x
+        input_ndims, input_shape = len(x.shape), tf.shape(x)
+        batch_size = input_shape[0] if input_ndims == 2 else 1
+        samples_per_batch = input_shape[1] if input_ndims == 2 else None
+        x_flat = tf.reshape(x, [-1]) if input_ndims == 2 else x
 
         self.coeff_history = self.coeffs.numpy().copy()
         self.result_history = []
@@ -347,41 +270,30 @@ class IndirectLearningDPD(tf.keras.layers.Layer):
             )
 
         for iteration in range(self._nIterations):
-            # Apply current predistortion
             u = self.predistort(x_flat)
 
-            # Pass through PA (need to handle batched PA)
+            # Pass through PA (handle batched PA)
             if input_ndims == 2:
-                u_batched = tf.reshape(u, [batch_size, samples_per_batch])
-                y_batched = pa(u_batched)
-                y = tf.reshape(y_batched, [-1])
+                y = tf.reshape(pa(tf.reshape(u, [batch_size, samples_per_batch])), [-1])
             else:
-                y = pa(tf.expand_dims(u, 0))
-                y = tf.reshape(y, [-1])
+                y = tf.reshape(pa(tf.expand_dims(u, 0)), [-1])
 
-            # Build basis matrix from PA output
             Y = self.setup_basis_matrix(y)
-
-            # Update coefficients based on learning method
             current_coeffs = self.coeffs
+
             if self._learning_method == "newton":
-                error = u - self.predistort(y)
-                update = self._ls_estimation(Y, error)
-                new_coeffs = current_coeffs + self._learning_rate * update
+                new_coeffs = current_coeffs + self._learning_rate * self._ls_estimation(
+                    Y, u - self.predistort(y)
+                )
             else:  # 'ema'
-                update = self._ls_estimation(Y, u)
                 new_coeffs = (
                     1 - self._learning_rate
-                ) * current_coeffs + self._learning_rate * update
+                ) * current_coeffs + self._learning_rate * self._ls_estimation(Y, u)
 
-            # Update coefficients using the setter
             self.coeffs = new_coeffs
-
-            # Record history
             self.coeff_history = np.hstack([self.coeff_history, self.coeffs.numpy()])
 
             if verbose:
-                # Compute power metrics
                 y_power = 10 * np.log10(np.mean(np.abs(y.numpy()) ** 2) + 1e-12)
                 print(
                     f"  Iteration {iteration + 1}/{self._nIterations}: "
@@ -391,10 +303,7 @@ class IndirectLearningDPD(tf.keras.layers.Layer):
         if verbose:
             print("DPD learning complete.")
 
-        return {
-            "coeffs": self.coeffs.numpy(),
-            "coeff_history": self.coeff_history,
-        }
+        return {"coeffs": self.coeffs.numpy(), "coeff_history": self.coeff_history}
 
     def plot_coeff_history(self, save_path=None):
         """Plot coefficient learning history."""
@@ -402,10 +311,8 @@ class IndirectLearningDPD(tf.keras.layers.Layer):
             print("No learning history available. Run perform_learning() first.")
             return
 
-        iterations = np.arange(self.coeff_history.shape[1])
-
         plt.figure(figsize=(10, 6))
-        plt.plot(iterations, np.abs(self.coeff_history.T))
+        plt.plot(np.arange(self.coeff_history.shape[1]), np.abs(self.coeff_history.T))
         plt.title("DPD Coefficient Learning History")
         plt.xlabel("Iteration")
         plt.ylabel("|coeffs|")

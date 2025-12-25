@@ -63,11 +63,7 @@ class Interpolator(tf.keras.layers.Layer):
     def output_rate(self):
         return self._output_rate
 
-    @property
-    def filter_length(self):
-        return len(self._filter_coeffs)
-
-    def call(self, x, padding="same"):
+    def call(self, x):
         """
         Interpolate input tensor using scipy (same as signal.py).
 
@@ -76,7 +72,6 @@ class Interpolator(tf.keras.layers.Layer):
 
         Args:
             x: [num_samples] or [B, num_samples] tensor
-            padding: unused (kept for API compatibility)
 
         Returns:
             Tuple of (interpolated tensor, output_rate)
