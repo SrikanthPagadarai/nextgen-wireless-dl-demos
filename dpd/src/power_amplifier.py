@@ -7,21 +7,15 @@ class PowerAmplifier(tf.keras.layers.Layer):
     """
     Memory polynomial power amplifier model as a differentiable Keras layer.
 
+    Uses fixed WARP board coefficients with order=7 and memory_depth=4.
     Supports batched input [B, num_samples] for Sionna-style processing.
-    Uses the same memory polynomial model as the original PowerAmplifier.
 
-    The PA model is: y[n] = sum_{k=1,3,5,...}^{order} sum_{m=0}^{memory_depth-1}
+    The PA model is: y[n] = sum_{k=1,3,5,7} sum_{m=0}^{3}
                             a_{k,m} * x[n-m] * |x[n-m]|^{k-1}
-
-    Args:
-        order: Polynomial order (must be odd, default: 7)
-        memory_depth: Memory depth in samples (default: 4)
-        coefficients: Optional custom coefficients [n_coeffs, memory_depth]
-                     If None, uses default WARP board coefficients
     """
 
-    # Default coefficients derived from a WARP board
-    DEFAULT_COEFFS = tf.constant(
+    # Default coefficients derived from a WARP board (immutable)
+    _DEFAULT_COEFFS = tf.constant(
         [
             [
                 0.9295 - 0.0001j,
@@ -51,23 +45,23 @@ class PowerAmplifier(tf.keras.layers.Layer):
         dtype=tf.complex64,
     )
 
-    def __init__(
-        self, order: int = 7, memory_depth: int = 4, coefficients=None, **kwargs
-    ):
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-        if order % 2 == 0:
-            raise ValueError("Order must be odd.")
+        self._order = 7
+        self._memory_depth = 4
+        self._n_coeffs = 4  # (order + 1) // 2
+        self._poly_coeffs = self._DEFAULT_COEFFS
 
-        self._order = order
-        self._memory_depth = memory_depth
-        self._n_coeffs = (order + 1) // 2
+    @property
+    def order(self):
+        """PA polynomial order (fixed at 7)."""
+        return self._order
 
-        # Use provided coefficients or prune defaults
-        if coefficients is not None:
-            self._poly_coeffs = tf.cast(coefficients, tf.complex64)
-        else:
-            self._poly_coeffs = self.DEFAULT_COEFFS[: self._n_coeffs, :memory_depth]
+    @property
+    def memory_depth(self):
+        """PA memory depth (fixed at 4)."""
+        return self._memory_depth
 
     def call(self, x):
         """
@@ -131,3 +125,31 @@ class PowerAmplifier(tf.keras.layers.Layer):
         # Stack columns: list of [..., num_samples] -> [..., num_samples, n_cols]
         X = tf.stack(columns, axis=-1)
         return X
+
+    def estimate_gain(self, num_samples=10000):
+        """
+        Estimate PA small-signal gain by measuring input/output power ratio.
+
+        Uses a low-amplitude test signal to measure gain in the linear region.
+
+        Args:
+            num_samples: Number of samples to use for estimation
+
+        Returns:
+            Estimated gain (linear scale)
+        """
+        # Generate a test signal with low amplitude (linear region)
+        test_input = tf.complex(
+            tf.random.normal([num_samples], stddev=0.1),
+            tf.random.normal([num_samples], stddev=0.1),
+        )
+
+        # Pass through PA
+        test_output = self(test_input)
+
+        # Compute gain as sqrt(output_power / input_power)
+        input_power = tf.reduce_mean(tf.abs(test_input) ** 2)
+        output_power = tf.reduce_mean(tf.abs(test_output) ** 2)
+        gain = tf.sqrt(output_power / (input_power + 1e-12))
+
+        return gain

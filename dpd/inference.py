@@ -36,16 +36,13 @@ import numpy as np  # noqa: E402
 import pickle  # noqa: E402
 import argparse  # noqa: E402
 from pathlib import Path  # noqa: E402
-from fractions import Fraction  # noqa: E402
 
-import matplotlib  # noqa: E402
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
-from scipy.signal import welch, resample_poly  # noqa: E402
+from scipy.signal import welch  # noqa: E402
 from scipy.signal.windows import kaiser  # noqa: E402
 
-from src.system import DPDSystem  # noqa: E402
+from src.config import Config  # noqa: E402
+from dpd.src.nn_dpd_system import NN_DPDSystem  # noqa: E402
+from dpd.src.ls_dpd_system import LS_DPDSystem  # noqa: E402
 
 
 # CLI Arguments
@@ -127,19 +124,26 @@ def compute_nmse(reference, signal):
     return 10 * np.log10(nmse.numpy())
 
 
-def plot_psd_comparison(
+def save_psd_data(
     pa_input,
     pa_output_no_dpd,
     pa_output_with_dpd,
     sample_rate,
     save_path,
     channel_bw=10e6,
-    dpd_label="DPD",
 ):
-    """Plot PSD comparison normalized to 0 dBc (in-band power = 0 dB).
+    """Save PSD data normalized to 0 dBc (in-band power = 0 dB).
 
     Computes PSD per-batch and averages to avoid artifacts from
     discontinuities at batch boundaries.
+
+    Args:
+        pa_input: PA input signal
+        pa_output_no_dpd: PA output without DPD
+        pa_output_with_dpd: PA output with DPD
+        sample_rate: Sample rate in Hz
+        save_path: Path to save the .npz file
+        channel_bw: Channel bandwidth in Hz
     """
 
     def to_numpy(x):
@@ -205,22 +209,17 @@ def plot_psd_comparison(
     psd_no_dpd_db = 10 * np.log10(psd_no_dpd_norm + 1e-12)
     psd_with_dpd_db = 10 * np.log10(psd_with_dpd_norm + 1e-12)
 
-    plt.figure(figsize=(12, 6))
-    plt.plot(freqs_mhz, psd_input_db, label="PA Input (Reference)", alpha=0.8)
-    plt.plot(freqs_mhz, psd_no_dpd_db, label="PA Output (No DPD)", alpha=0.8)
-    plt.plot(freqs_mhz, psd_with_dpd_db, label=f"PA Output ({dpd_label})", alpha=0.8)
-    plt.xlabel("Frequency (MHz)")
-    plt.ylabel("PSD (dBc)")
-    plt.title(f"Power Spectral Density: Effect of {dpd_label}")
-    plt.legend()
-    plt.grid(True)
-    plt.ylim([-120, 10])  # Typical range for DPD plots
-    plt.tight_layout()
-    plt.savefig(save_path, dpi=150)
-    plt.close()
+    # Save data
+    np.savez(
+        save_path,
+        freqs_mhz=freqs_mhz,
+        psd_input_db=psd_input_db,
+        psd_no_dpd_db=psd_no_dpd_db,
+        psd_with_dpd_db=psd_with_dpd_db,
+    )
 
 
-def plot_constellation(
+def save_constellation_data(
     eval_system,
     pa_input,
     pa_output_no_dpd,
@@ -228,131 +227,49 @@ def plot_constellation(
     tx_baseband,
     fd_symbols,
     save_path,
-    dpd_label="DPD",
 ):
     """
-    Plot overlapped constellation comparison showing 16-QAM points.
+    Save constellation data for later plotting.
 
-    Uses proper OFDM demodulation and per-subcarrier equalization.
+    Uses OFDMReceiver for complete receiver-side processing.
+
+    Args:
+        eval_system: DPD system instance
+        pa_input: PA input signal
+        pa_output_no_dpd: PA output without DPD
+        pa_output_with_dpd: PA output with DPD
+        tx_baseband: Baseband transmit signal
+        fd_symbols: Frequency domain symbols
+        save_path: Path to save the .npz file
+
+    Returns:
+        Tuple of (evm_input, evm_no_dpd, evm_with_dpd)
     """
-    signal_fs = eval_system.signal_fs
-    pa_sample_rate = eval_system.pa_sample_rate
-    fft_size = eval_system.fft_size
-    cp_length = eval_system.cp_length
-    num_symbols = eval_system.num_ofdm_symbols
+    # Use OFDMReceiver to process all signals
+    result = eval_system.ofdm_receiver.process_and_compute_evm(
+        pa_input=pa_input,
+        pa_output_no_dpd=pa_output_no_dpd,
+        pa_output_with_dpd=pa_output_with_dpd,
+        tx_baseband=tx_baseband,
+        fd_symbols=fd_symbols,
+    )
 
-    # Flatten all signals
-    def flatten(x):
-        if len(x.shape) > 1:
-            return tf.reshape(x, [-1]).numpy()
-        return x.numpy() if hasattr(x, "numpy") else x
-
-    pa_input_flat = flatten(pa_input)
-    pa_no_dpd_flat = flatten(pa_output_no_dpd)
-    pa_with_dpd_flat = flatten(pa_output_with_dpd)
-    tx_baseband_np = flatten(tx_baseband)
-
-    # Downsample from PA rate to signal rate
-    frac = Fraction(signal_fs / pa_sample_rate).limit_denominator(1000)
-    data_input = resample_poly(pa_input_flat, frac.numerator, frac.denominator)
-    data_no_dpd = resample_poly(pa_no_dpd_flat, frac.numerator, frac.denominator)
-    data_with_dpd = resample_poly(pa_with_dpd_flat, frac.numerator, frac.denominator)
-
-    original_len = (fft_size + cp_length) * num_symbols
-
-    # Synchronize using cross-correlation
-    sync_len = min(1000, len(tx_baseband_np) // 2)
-
-    def find_delay(signal, ref):
-        return np.argmax(np.abs(np.correlate(signal, ref[:sync_len], mode="valid")))
-
-    delay_input = find_delay(data_input, tx_baseband_np)
-    delay_no_dpd = find_delay(data_no_dpd, tx_baseband_np)
-    delay_with_dpd = find_delay(data_with_dpd, tx_baseband_np)
-
-    data_input_sync = data_input[delay_input : delay_input + original_len]
-    data_no_dpd_sync = data_no_dpd[delay_no_dpd : delay_no_dpd + original_len]
-    data_with_dpd_sync = data_with_dpd[delay_with_dpd : delay_with_dpd + original_len]
-
-    # Demodulate using DPDSystem's demod method
-    symbols_input = eval_system.demod(data_input_sync)
-    symbols_no_dpd = eval_system.demod(data_no_dpd_sync)
-    symbols_with_dpd = eval_system.demod(data_with_dpd_sync)
-
-    # Per-subcarrier equalization
-    def equalize(rx, tx):
-        rx = tf.cast(rx, tf.complex64)
-        tx = tf.cast(tx, tf.complex64)
-        H = tf.reduce_sum(rx * tf.math.conj(tx), axis=1, keepdims=True) / tf.cast(
-            tf.reduce_sum(tf.abs(tx) ** 2, axis=1, keepdims=True), tf.complex64
-        )
-        return rx / H
-
-    symbols_input = equalize(symbols_input, fd_symbols)
-    symbols_no_dpd = equalize(symbols_no_dpd, fd_symbols)
-    symbols_with_dpd = equalize(symbols_with_dpd, fd_symbols)
-
-    # Convert to numpy for plotting
+    # Convert fd_symbols to numpy for saving
     fd_np = fd_symbols.numpy() if isinstance(fd_symbols, tf.Tensor) else fd_symbols
-    sym_input_np = symbols_input.numpy()
-    sym_no_dpd_np = symbols_no_dpd.numpy()
-    sym_with_dpd_np = symbols_with_dpd.numpy()
 
-    # Compute EVM
-    def compute_evm(rx, tx):
-        error = rx - tx
-        evm = np.sqrt(np.mean(np.abs(error) ** 2) / np.mean(np.abs(tx) ** 2)) * 100
-        return evm
+    # Save data
+    np.savez(
+        save_path,
+        fd_symbols=fd_np,
+        sym_input=result["symbols_input"],
+        sym_no_dpd=result["symbols_no_dpd"],
+        sym_with_dpd=result["symbols_with_dpd"],
+        evm_input=result["evm_input"],
+        evm_no_dpd=result["evm_no_dpd"],
+        evm_with_dpd=result["evm_with_dpd"],
+    )
 
-    evm_input = compute_evm(sym_input_np, fd_np)
-    evm_no_dpd = compute_evm(sym_no_dpd_np, fd_np)
-    evm_with_dpd = compute_evm(sym_with_dpd_np, fd_np)
-
-    # Plot overlapped constellation
-    plt.figure(figsize=(10, 10))
-    plt.plot(
-        fd_np.real.flatten(),
-        fd_np.imag.flatten(),
-        "o",
-        ms=4,
-        label="Original (TX)",
-        alpha=0.5,
-    )
-    plt.plot(
-        sym_input_np.real.flatten(),
-        sym_input_np.imag.flatten(),
-        "s",
-        ms=3,
-        label=f"PA Input (EVM={evm_input:.1f}%)",
-        alpha=0.5,
-    )
-    plt.plot(
-        sym_no_dpd_np.real.flatten(),
-        sym_no_dpd_np.imag.flatten(),
-        "x",
-        ms=3,
-        label=f"PA Output, no DPD (EVM={evm_no_dpd:.1f}%)",
-        alpha=0.5,
-    )
-    plt.plot(
-        sym_with_dpd_np.real.flatten(),
-        sym_with_dpd_np.imag.flatten(),
-        ".",
-        ms=3,
-        label=f"PA Output, with {dpd_label} (EVM={evm_with_dpd:.1f}%)",
-        alpha=0.5,
-    )
-    plt.xlabel("In-Phase (I)")
-    plt.ylabel("Quadrature (Q)")
-    plt.title(f"Constellation Comparison: Effect of {dpd_label}")
-    plt.legend(loc="upper right")
-    plt.grid(True, alpha=0.3)
-    plt.axis("equal")
-    plt.tight_layout()
-    plt.savefig(save_path, dpi=150)
-    plt.close()
-
-    return evm_input, evm_no_dpd, evm_with_dpd
+    return result["evm_input"], result["evm_no_dpd"], result["evm_with_dpd"]
 
 
 def main():
@@ -360,16 +277,16 @@ def main():
     print(f"{DPD_LABEL} Inference")
     print("=" * 70)
 
+    # Create config
+    config = Config(batch_size=BATCH_SIZE)
+
     # Build eval system
     print(f"\n[1] Building evaluation system with {DPD_LABEL}...")
 
     if DPD_METHOD == "nn":
-        eval_system = DPDSystem(
+        eval_system = NN_DPDSystem(
             training=False,
-            dpd_method="nn",
-            tx_config_path="src/tx_config.json",
-            pa_order=7,
-            pa_memory_depth=4,
+            config=config,
             dpd_memory_depth=4,
             dpd_num_filters=64,
             dpd_num_layers_per_block=2,
@@ -378,12 +295,9 @@ def main():
             pa_sample_rate=PA_SAMPLE_RATE,
         )
     else:  # "ls"
-        eval_system = DPDSystem(
+        eval_system = LS_DPDSystem(
             training=False,
-            dpd_method="ls",
-            tx_config_path="src/tx_config.json",
-            pa_order=7,
-            pa_memory_depth=4,
+            config=config,
             dpd_order=7,
             dpd_memory_depth=4,
             rms_input_dbm=0.5,
@@ -459,40 +373,38 @@ def main():
     print(f"    NMSE ({DPD_LABEL}):  {nmse_with_dpd:.2f} dB")
     print(f"    NMSE Improvement: {nmse_no_dpd - nmse_with_dpd:.2f} dB")
 
-    # Generate PSD plot
-    print("\n[6] Generating PSD comparison plot...")
-    psd_path = outdir / f"psd_comparison_{DPD_METHOD}.png"
-    plot_psd_comparison(
+    # Save PSD data
+    print("\n[6] Saving PSD data...")
+    psd_data_path = outdir / f"psd_data_{DPD_METHOD}.npz"
+    save_psd_data(
         pa_input,
         pa_output_no_dpd,
         pa_output_with_dpd,
         PA_SAMPLE_RATE,
-        psd_path,
+        psd_data_path,
         channel_bw=CHANNEL_BW,
-        dpd_label=DPD_LABEL,
     )
-    print(f"    Saved to {psd_path}")
+    print(f"    Saved to {psd_data_path}")
 
-    # Generate constellation plot
-    print("\n[7] Generating constellation plot...")
-    const_path = outdir / f"constellation_comparison_{DPD_METHOD}.png"
+    # Save constellation data
+    print("\n[7] Saving constellation data...")
+    const_data_path = outdir / f"constellation_data_{DPD_METHOD}.npz"
     try:
-        evm_input, evm_no_dpd, evm_with_dpd = plot_constellation(
+        evm_input, evm_no_dpd, evm_with_dpd = save_constellation_data(
             eval_system,
             pa_input,
             pa_output_no_dpd,
             pa_output_with_dpd,
             tx_baseband,
             fd_symbols,
-            const_path,
-            dpd_label=DPD_LABEL,
+            const_data_path,
         )
-        print(f"    Saved to {const_path}")
+        print(f"    Saved to {const_data_path}")
         print(f"    EVM (PA Input):  {evm_input:.2f}%")
         print(f"    EVM (No DPD):    {evm_no_dpd:.2f}%")
         print(f"    EVM ({DPD_LABEL}):   {evm_with_dpd:.2f}%")
     except Exception as e:
-        print(f"    Constellation plot failed: {e}")
+        print(f"    Constellation data save failed: {e}")
         import traceback
 
         traceback.print_exc()
@@ -547,9 +459,11 @@ def main():
         evm_with_dpd=evm_with_dpd if evm_with_dpd else 0,
     )
     print(f"\nResults saved to {results_file}")
-    print("\nPlots saved:")
-    print(f"  - {psd_path}")
-    print(f"  - {const_path}")
+    print("\nData files saved:")
+    print(f"  - {psd_data_path}")
+    print(f"  - {const_data_path}")
+    plot_script = "plots_nn.py" if DPD_METHOD == "nn" else "plots_ls.py"
+    print(f"\nRun 'python {plot_script}' to generate plots.")
 
 
 if __name__ == "__main__":

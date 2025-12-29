@@ -32,7 +32,8 @@ import numpy as np  # noqa: E402
 import pickle  # noqa: E402
 import argparse  # noqa: E402
 
-from src.system import DPDSystem  # noqa: E402
+from src.config import Config  # noqa: E402
+from dpd.src.ls_dpd_system import LS_DPDSystem  # noqa: E402
 
 
 # CLI
@@ -79,14 +80,14 @@ args = parser.parse_args()
 # Filesystem
 os.makedirs("results", exist_ok=True)
 
+# Create config
+config = Config(batch_size=args.batch_size)
+
 # System
-print("Building DPD System with LS-DPD...")
-system = DPDSystem(
+print("Building LS-DPD System...")
+system = LS_DPDSystem(
     training=True,
-    dpd_method="ls",
-    tx_config_path="src/tx_config.json",
-    pa_order=7,
-    pa_memory_depth=4,
+    config=config,
     dpd_order=args.order,
     dpd_memory_depth=args.memory_depth,
     ls_nIterations=args.iterations,
@@ -134,28 +135,7 @@ print(f"Saved weights to {weights_file}")
 coeff_history_file = os.path.join("results", "ls-dpd-coeff-history.npy")
 np.save(coeff_history_file, result["coeff_history"])
 print(f"Saved coefficient history to {coeff_history_file}")
-
-# Plot coefficient history
-try:
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    plt.figure(figsize=(10, 6))
-    coeff_hist = result["coeff_history"]
-    for i in range(min(10, coeff_hist.shape[0])):  # Plot first 10 coefficients
-        plt.plot(np.abs(coeff_hist[i, :]), label=f"Coeff {i}")
-    plt.title("LS-DPD Coefficient Convergence")
-    plt.xlabel("Iteration")
-    plt.ylabel("|Coefficient|")
-    plt.legend(loc="best", fontsize=8)
-    plt.grid(True)
-    plt.savefig(os.path.join("results", "ls_dpd_convergence.png"), dpi=150)
-    plt.close()
-    print("Saved convergence plot to results/ls_dpd_convergence.png")
-except ImportError:
-    print("matplotlib not available, skipping convergence plot")
+print("Run 'python plots_ls.py' to generate plots.")
 
 # Print final coefficients summary
 final_coeffs = result["coeffs"]

@@ -32,7 +32,8 @@ import numpy as np  # noqa: E402
 import pickle  # noqa: E402
 import argparse  # noqa: E402
 
-from src.system import DPDSystem  # noqa: E402
+from src.config import Config  # noqa: E402
+from dpd.src.nn_dpd_system import NN_DPDSystem  # noqa: E402
 
 
 # CLI
@@ -56,14 +57,14 @@ os.makedirs("results", exist_ok=True)
 os.makedirs("checkpoints", exist_ok=True)
 ckpt_dir = "checkpoints"
 
+# Create config
+config = Config(batch_size=BATCH_SIZE)
+
 # Build system
-print("Building DPD System...")
-system = DPDSystem(
+print("Building NN-DPD System...")
+system = NN_DPDSystem(
     training=True,
-    dpd_method="nn",
-    tx_config_path="src/tx_config.json",
-    pa_order=7,
-    pa_memory_depth=4,
+    config=config,
     dpd_memory_depth=4,
     dpd_num_filters=64,
     dpd_num_layers_per_block=2,
@@ -180,22 +181,4 @@ np.save(
 with open(os.path.join("results", "nn-dpd-weights"), "wb") as f:
     pickle.dump(system.get_weights(), f)
 print("Saved checkpoints, loss history, and weights.")
-
-# Plot loss history
-try:
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    plt.figure(figsize=(10, 6))
-    plt.semilogy(loss_history)
-    plt.title("NN DPD Training Loss")
-    plt.xlabel("Iteration")
-    plt.ylabel("MSE Loss")
-    plt.grid(True)
-    plt.savefig(os.path.join("results", "training_loss.png"), dpi=150)
-    plt.close()
-    print("Saved training loss plot to results/training_loss.png")
-except ImportError:
-    print("matplotlib not available, skipping loss plot")
+print("Run 'python plots_nn.py' to generate plots.")
