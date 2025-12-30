@@ -80,6 +80,8 @@ def test_trainable_transmitter_forward(training):
         print(f"  b shape: {b.shape}")
         print(f"  c shape: {c.shape}")
     else:
+        # Inference mode - transmitter inherits from PUSCHTransmitter
+        # which returns (x, b) when return_bits=True (default)
         x, b = output
         assert x.shape[0] == batch_size
         assert b.shape[0] == batch_size

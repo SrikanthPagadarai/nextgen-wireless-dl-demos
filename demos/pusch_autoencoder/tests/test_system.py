@@ -75,7 +75,7 @@ def test_system_inference(perfect_csi, use_autoencoder):
         training=False,
     )
 
-    test_batch_size = 8
+    test_batch_size = tf.constant(8, tf.int32)  # Use tensor
     ebno_db = tf.constant(20.0, tf.float32)
 
     # Run inference
@@ -96,7 +96,7 @@ def test_system_inference(perfect_csi, use_autoencoder):
 
     # Check output shapes
     assert b.shape == b_hat.shape
-    assert b.shape[0] == test_batch_size
+    assert b.shape[0] == 8  # test_batch_size
 
 
 @pytest.mark.parametrize("perfect_csi", [True, False])
@@ -112,7 +112,7 @@ def test_system_training_mode(perfect_csi):
         training=True,
     )
 
-    test_batch_size = 8
+    test_batch_size = tf.constant(8, tf.int32)  # Use tensor
     ebno_db = tf.constant(15.0, tf.float32)
 
     # Run in training mode (returns loss)
@@ -144,7 +144,7 @@ def test_system_trainable_variables_baseline():
     print("\n[Baseline System Trainable Vars]:")
     print(f"  Number of trainable variables: {len(trainable_vars)}")
 
-    # Baseline should have no trainable variables
+    # Baseline should have empty list (property returns empty list)
     assert len(trainable_vars) == 0
 
 
@@ -229,7 +229,7 @@ def test_system_different_snr(ebno_db):
         channel_model=(a, tau), perfect_csi=True, use_autoencoder=False, training=False
     )
 
-    test_batch_size = 8
+    test_batch_size = tf.constant(8, tf.int32)  # Use tensor
     ebno = tf.constant(ebno_db, tf.float32)
 
     # Run inference
@@ -253,12 +253,13 @@ def test_system_batch_size_variation():
 
     ebno_db = tf.constant(15.0, tf.float32)
 
-    for test_batch_size in [4, 8, 16]:
+    for test_batch_size_val in [4, 8, 16]:
+        test_batch_size = tf.constant(test_batch_size_val, tf.int32)  # Use tensor
         b, b_hat = system(test_batch_size, ebno_db)
 
-        print(f"\n[Batch Size {test_batch_size}]:")
+        print(f"\n[Batch Size {test_batch_size_val}]:")
         print(f"  b shape: {b.shape}")
-        print(f"  b_hat shape: {b_hat.shape}")
+        print(f"  b_hat shape: {b.shape}")
 
-        assert b.shape[0] == test_batch_size
-        assert b_hat.shape[0] == test_batch_size
+        assert b.shape[0] == test_batch_size_val
+        assert b_hat.shape[0] == test_batch_size_val
