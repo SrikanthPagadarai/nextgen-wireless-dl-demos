@@ -117,8 +117,8 @@ def test_ls_dpd_system_inference_forward():
     # Estimate PA gain first
     system.estimate_pa_gain()
 
-    # Run inference
-    result = system(batch_size=4)
+    # Run inference (positional argument, not keyword)
+    result = system(4)
 
     assert "pa_input" in result
     assert "pa_output_no_dpd" in result
@@ -141,7 +141,7 @@ def test_ls_dpd_system_training_forward_raises():
     system = LS_DPDSystem(training=True, config=cfg)
 
     with pytest.raises(ValueError, match="Use perform_ls_learning"):
-        system(batch_size=4)
+        system(4)  # positional argument
 
 
 def test_ls_dpd_system_ls_training_iteration():
@@ -179,6 +179,10 @@ def test_ls_dpd_system_perform_ls_learning():
     # Estimate PA gain first
     system.estimate_pa_gain()
 
+    # Build the DPD layer by running a forward pass
+    x = system.generate_signal(batch_size=10)
+    _ = system._dpd(x)  # This builds the layer
+
     # Perform learning
     result = system.perform_ls_learning(batch_size=10, verbose=False)
 
@@ -202,6 +206,10 @@ def test_ls_dpd_system_perform_ls_learning_custom_iterations():
     system = LS_DPDSystem(training=True, config=cfg, ls_nIterations=3)
 
     system.estimate_pa_gain()
+
+    # Build the DPD layer by running a forward pass
+    x = system.generate_signal(batch_size=10)
+    _ = system._dpd(x)  # This builds the layer
 
     # Override with custom iteration count
     result = system.perform_ls_learning(batch_size=10, nIterations=5, verbose=False)
@@ -290,6 +298,11 @@ def test_ls_dpd_system_learning_methods(learning_method):
     )
 
     system.estimate_pa_gain()
+
+    # Build the DPD layer by running a forward pass
+    x = system.generate_signal(batch_size=10)
+    _ = system._dpd(x)  # This builds the layer
+
     result = system.perform_ls_learning(batch_size=10, verbose=False)
 
     assert result["coeffs"] is not None

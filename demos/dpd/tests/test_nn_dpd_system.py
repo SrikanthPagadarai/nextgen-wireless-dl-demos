@@ -97,8 +97,8 @@ def test_nn_dpd_system_training_forward():
     # Estimate PA gain first
     system.estimate_pa_gain()
 
-    # Run training forward pass
-    loss = system(batch_size=4)
+    # Run training forward pass (positional argument)
+    loss = system(4)
 
     # Should return scalar loss
     assert loss.shape == ()
@@ -117,8 +117,8 @@ def test_nn_dpd_system_inference_forward():
     # Estimate PA gain first
     system.estimate_pa_gain()
 
-    # Run inference
-    result = system(batch_size=4)
+    # Run inference (positional argument)
+    result = system(4)
 
     assert "pa_input" in result
     assert "pa_output_no_dpd" in result
@@ -142,7 +142,7 @@ def test_nn_dpd_system_trainable_variables():
 
     # Estimate PA gain and run forward to build model
     system.estimate_pa_gain()
-    _ = system(batch_size=4)
+    _ = system(4)  # positional argument
 
     trainable_vars = system.trainable_variables
 
@@ -165,7 +165,7 @@ def test_nn_dpd_system_gradient_flow():
     system.estimate_pa_gain()
 
     with tf.GradientTape() as tape:
-        loss = system(batch_size=4)
+        loss = system(4)  # positional argument
 
     grads = tape.gradient(loss, system.trainable_variables)
 
@@ -233,7 +233,7 @@ def test_nn_dpd_system_loss_scaling():
     system.estimate_pa_gain()
 
     # The loss should be scaled by _loss_scale (1000.0)
-    loss = system(batch_size=4)
+    loss = system(4)  # positional argument
 
     # Loss should be reasonable magnitude (scaled up)
     assert float(loss) > 0
@@ -291,7 +291,7 @@ def test_nn_dpd_system_various_batch_sizes(batch_size):
     system = NN_DPDSystem(training=True, config=cfg)
 
     system.estimate_pa_gain()
-    loss = system(batch_size=batch_size)
+    loss = system(batch_size)  # positional argument
 
     assert not tf.math.is_nan(loss)
 
@@ -308,12 +308,12 @@ def test_nn_dpd_system_training_step():
 
     optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4)
 
-    # Initial loss
-    initial_loss = system(batch_size=4)
+    # Initial loss (positional argument)
+    initial_loss = system(4)
 
     # Training step
     with tf.GradientTape() as tape:
-        loss = system(batch_size=4)
+        loss = system(4)  # positional argument
 
     grads = tape.gradient(loss, system.trainable_variables)
     optimizer.apply_gradients(zip(grads, system.trainable_variables))
