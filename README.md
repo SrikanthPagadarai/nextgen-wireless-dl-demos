@@ -4,6 +4,8 @@
 
 Deep learning demos for B5G/6G wireless systems using TensorFlow and [Sionna](https://nvlabs.github.io/sionna/).
 
+⚠️ **Note:** This project is under active development and not accepting external contributions at this time.
+
 ## Overview
 
 This repository contains neural network-based demos for 5G/6G communication systems:

@@ -43,7 +43,7 @@ python demos/mimo_ofdm_neural_receiver/training.py --iterations 5000 --fresh
 
 ## Baseline Evaluation
 
-Evaluate the traditional baseline receiver (LMMSE equalization):
+Evaluate the traditional baseline receiver (LS channel estimation + LMMSE equalization):
 
 ```bash
 python demos/mimo_ofdm_neural_receiver/baseline.py

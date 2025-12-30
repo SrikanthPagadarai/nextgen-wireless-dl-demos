@@ -1,6 +1,6 @@
 # Digital Pre-Distortion (DPD) Demo
 
-This demo implements Digital Pre-Distortion techniques for power amplifier (PA) linearization in wireless communication systems. It supports two DPD methods: Neural Network (NN) DPD and Least-Squares (LS) DPD.
+This demo implements Digital Pre-Distortion techniques for power amplifier (PA) linearization in wireless communication systems which use a 5G-like time-frequency resource grid. It supports two DPD methods: Neural Network (NN) DPD and Least-Squares (LS) DPD. In both methods, the DPD parameters are identified in an indirect learning architecture.
 
 ## Overview
 
@@ -12,7 +12,7 @@ Digital Pre-Distortion compensates for the nonlinear distortion introduced by po
 
 ### Least-Squares DPD Training
 
-LS-DPD uses closed-form least-squares estimation with the Indirect Learning Architecture:
+LS-DPD uses closed-form least-squares estimation:
 
 ```bash
 python demos/dpd/training_ls.py
@@ -37,7 +37,7 @@ python demos/dpd/training_ls.py --iterations 5 --batch_size 32
 
 ### Neural Network DPD Training
 
-NN-DPD uses gradient-based optimization with the Indirect Learning Architecture:
+NN-DPD uses gradient-based learning:
 
 ```bash
 python demos/dpd/training_nn.py --iterations 10000
@@ -102,6 +102,7 @@ python demos/dpd/plots_ls.py
 - `results/constellation_comparison_{method}.png` - Constellation diagram comparison
 
 ## Complete Workflow Example
+For NN-DPD:
 
 ```bash
 # 1. Train NN-DPD
@@ -114,7 +115,7 @@ python demos/dpd/inference.py --dpd_method nn
 python demos/dpd/plots_nn.py
 ```
 
-Or for LS-DPD:
+For LS-DPD:
 
 ```bash
 # 1. Train LS-DPD

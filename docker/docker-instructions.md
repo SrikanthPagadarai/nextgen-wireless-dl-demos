@@ -22,7 +22,7 @@
 `$ docker run -it -v "$PWD":/app -w /app sionna-dl-6g:cpu bash`
 
 ### Run on a GPU host (with NVIDIA Container Toolkit installed)
-`$ docker run -it --gpus all \`
-`  -e NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics \`
-`  -e DRJIT_LIBOPTIX_PATH=/usr/lib/x86_64-linux-gnu/libnvoptix.so.1 \`
+`$ docker run -it --gpus all \`<br>
+`  -e NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics \`<br>
+`  -e DRJIT_LIBOPTIX_PATH=/usr/lib/x86_64-linux-gnu/libnvoptix.so.1 \`<br>
 `  -v "$PWD":/app -w /app sionna-dl-6g:gpu-12.2`
