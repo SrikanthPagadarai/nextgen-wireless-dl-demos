@@ -117,8 +117,8 @@ def test_ls_dpd_system_inference_forward():
     # Estimate PA gain first
     system.estimate_pa_gain()
 
-    # Run inference (positional argument, not keyword)
-    result = system(4)
+    # Run inference (use batch_size_or_signal keyword for Keras layer)
+    result = system(batch_size_or_signal=4)
 
     assert "pa_input" in result
     assert "pa_output_no_dpd" in result
@@ -141,7 +141,7 @@ def test_ls_dpd_system_training_forward_raises():
     system = LS_DPDSystem(training=True, config=cfg)
 
     with pytest.raises(ValueError, match="Use perform_ls_learning"):
-        system(4)  # positional argument
+        system(batch_size_or_signal=4)
 
 
 def test_ls_dpd_system_ls_training_iteration():
