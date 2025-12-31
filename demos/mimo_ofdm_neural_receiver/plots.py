@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # Files
-BASELINE_FILE = os.path.join("results", "all_baseline_results_cdlC.npz")
+BASELINE_FILE = os.path.join("results", "baseline_results_cdlC.npz")
 INFERENCE_FILE = os.path.join("results", "inference_results.npz")
 LOSS_FILE = os.path.join("results", "loss.npy")
 
@@ -26,7 +26,7 @@ inf_bler = inf["bler"]
 # Loss plot (single-run)
 if os.path.exists(LOSS_FILE):
     loss = np.load(LOSS_FILE)
-    outfile = os.path.join("results", "loss.png")
+    outfile = os.path.join("results", "training_loss.png")
     plt.figure()
     plt.semilogy(loss)
     plt.xlabel("iteration")

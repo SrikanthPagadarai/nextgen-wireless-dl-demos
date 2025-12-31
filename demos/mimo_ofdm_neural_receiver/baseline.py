@@ -67,7 +67,7 @@ for perfect_csi in perfect_csi_values:
 
     csi_tag = "perfect CSI" if perfect_csi else "imperfect CSI"
     print(
-        f"[CDL-{cfg['cdl_model']}] uplink   | {csi_tag:13s} | "
+        f"[CDL-{cfg['cdl_model']}]   | {csi_tag:13s} | "
         f"BLER={np.array2string(bler.numpy(), precision=3)}"
     )
 dur_min = (time.time() - t0) / 60.0

@@ -4,3 +4,8 @@ __pycache__/
 *.pyo
 *.[Pp][Nn][Gg]
 docs/_build/
+
+# Re-include specific PNGs
+!demos/mimo_ofdm_neural_receiver/results/ber_cdlC.png
+!demos/mimo_ofdm_neural_receiver/results/bler_cdlC.png
+!demos/mimo_ofdm_neural_receiver/results/training_loss.png
