@@ -1,3 +1,61 @@
+"""
+End-to-end training script for PUSCH autoencoder with neural detection.
+
+This script trains the joint transmitter-receiver autoencoder system,
+optimizing both the constellation geometry and the neural MIMO detector
+to minimize Binary Cross-Entropy (BCE) loss on coded bits.
+
+Training Modes
+--------------
+The script supports two training strategies via command-line argument:
+
+1. **conventional**: Updates TX and RX simultaneously each iteration.
+   Simple but can lead to instability when TX changes faster than
+   RX can adapt.
+
+2. **two_phase**: Updates RX 10 times per TX update, allowing the
+   receiver to stabilize before constellation changes. This addresses
+   the asymmetric learning dynamics where receiver gradients are ~100x
+   larger than transmitter gradients.
+
+Architecture
+------------
+The autoencoder consists of:
+
+- **Transmitter**: Trainable 16-QAM constellation (16 complex points)
+- **Receiver**: Neural MIMO detector with:
+  - Shared backbone (4 ResBlocks)
+  - Channel estimation refinement head
+  - Detection continuation network (6 ResBlocks)
+  - Three trainable correction scales (h, err_var, LLR)
+
+Training Strategy
+-----------------
+- **Gradient accumulation**: 16 micro-batches averaged before update
+  to reduce gradient variance and enable larger effective batch sizes.
+- **Separate optimizers**: TX, RX scales, and RX NN weights use different
+  learning rates (1e-2, 1e-2, 1e-4 respectively with cosine decay).
+- **SNR curriculum**: Random Eb/N0 in [-2, 10] dB per batch for robustness
+  across operating conditions.
+
+Output
+------
+Results are saved to ``results/`` directory:
+
+- ``PUSCH_autoencoder_weights_{mode}_training``: Final TX/RX weights (pickle)
+- ``{mode}_training_loss.npy``: Loss history array
+- ``{mode}_training_loss.png``: Loss curve plot
+- ``constellations_overlaid_{mode}.png``: Before/after constellation comparison
+- Checkpoints every 1000 iterations
+
+Usage
+-----
+Run from the repository root::
+
+    python -m demos.pusch_autoencoder.training conventional
+    python -m demos.pusch_autoencoder.training two_phase
+"""
+
 import os
 import sys
 import pickle
@@ -12,9 +70,11 @@ import time
 
 start = time.time()
 
-# ----------------------------------------
-# Parse command-line argument
-# ----------------------------------------
+
+# =============================================================================
+# Command-Line Argument Parsing
+# =============================================================================
+# Training mode determines update strategy (see module docstring)
 if len(sys.argv) != 2 or sys.argv[1] not in ("conventional", "two_phase"):
     print("Usage: python training.py [conventional|two_phase]")
     sys.exit(1)
@@ -22,41 +82,54 @@ if len(sys.argv) != 2 or sys.argv[1] not in ("conventional", "two_phase"):
 training_mode = sys.argv[1]
 print(f"Training mode: {training_mode}")
 
-# Get configuration
+
+# =============================================================================
+# System Configuration and Channel Model
+# =============================================================================
 _cfg = Config()
 batch_size = _cfg.batch_size
 
-# Build channel model
+# Load MU-MIMO grouped CIR data (4 UEs per sample)
+# This is different from baseline.py which uses CIRDataset for on-demand sampling
 cir_manager = CIRManager()
 channel_model = cir_manager.load_from_tfrecord(group_for_mumimo=True)
 
-# Instantiate and train the end-to-end system
+
+# =============================================================================
+# Model Instantiation and Initial Verification
+# =============================================================================
+# Create E2E model in training mode (returns BCE loss, not decoded bits)
 ebno_db_test = tf.fill([batch_size], 10.0)
 model = PUSCHLinkE2E(
     channel_model, perfect_csi=False, use_autoencoder=True, training=True
 )
+
+# Verify forward pass works and inspect model structure
 loss = model(batch_size, ebno_db_test)
 print("  Initial forward-pass loss:", loss.numpy())
 print("  Trainable variable count:", len(model.trainable_variables))
 for v in model.trainable_variables[:5]:
     print("   ", v.name, v.shape)
 
-# Snapshot initial constellation (before training)
+# Snapshot initial constellation for before/after comparison plot
+# Using tf.identity to create a copy that won't be modified during training
 init_const_real = tf.identity(model._pusch_transmitter._points_r)
 init_const_imag = tf.identity(model._pusch_transmitter._points_i)
 
-# ----------------------------------------
-# Split variables into groups with different learning rates
-# ----------------------------------------
+
+# =============================================================================
+# Variable Grouping for Separate Learning Rates
+# =============================================================================
+# Different components benefit from different learning rates:
+# - TX constellation: slow updates to allow RX to adapt
+# - RX correction scales: fast updates to find good operating points
+# - RX NN weights: moderate updates for stable convergence
+
 tx_vars = model._pusch_transmitter.trainable_variables
 rx_vars_all = model._pusch_receiver.trainable_variables
 
-# Split RX variables: first 3 are correction scales, rest are NN weights
-# Order in trainable_variables:
-# _h_correction_scale,
-# _err_var_correction_scale_raw,
-# _llr_correction_scale,
-# then conv weights
+# Neural detector returns variables in specific order (see PUSCHNeuralDetector):
+# [h_correction_scale, err_var_correction_scale_raw, llr_correction_scale, ...conv weights...]
 rx_scale_vars = rx_vars_all[:3]
 nn_rx_vars = rx_vars_all[3:]
 
@@ -74,10 +147,15 @@ for v in nn_rx_vars[:5]:
     print(f"  {v.name}: {v.shape}")
 print("=== End variable groups ===\n")
 
-# All variables for gradient computation
+# Combined list for gradient computation (order matters for slicing)
 all_vars = tx_vars + rx_scale_vars + nn_rx_vars
 
-# ---- Gradient sanity check: one step in eager mode ----
+
+# =============================================================================
+# Gradient Sanity Check
+# =============================================================================
+# Verify gradients flow to all variable groups before starting long training.
+# This catches issues like disconnected computation graphs or None gradients.
 print("\n=== Single-step gradient sanity check ===")
 
 dbg_batch_size = 4
@@ -88,6 +166,7 @@ with tf.GradientTape() as tape:
 
 all_grads = tape.gradient(loss_dbg, all_vars)
 
+# Slice gradients to match variable groups
 n_tx = len(tx_vars)
 n_scales = len(rx_scale_vars)
 
@@ -95,6 +174,7 @@ grads_tx = all_grads[:n_tx]
 grads_scales = all_grads[n_tx : n_tx + n_scales]
 grads_rx_nn = all_grads[n_tx + n_scales :]
 
+# Print gradient norms to verify flow (None = disconnected, 0 = vanishing)
 print("\nTransmitter gradients:")
 for v, g in zip(tx_vars, grads_tx):
     g_norm = 0.0 if g is None else float(tf.norm(g).numpy())
@@ -112,15 +192,18 @@ for v, g in zip(nn_rx_vars[:5], grads_rx_nn[:5]):
 
 print("=== End gradient sanity check ===\n")
 
-# ----------------------------------------
-# Training loop
-# ----------------------------------------
-ebno_db_min = -2.0
-ebno_db_max = 10.0
+
+# =============================================================================
+# Training Hyperparameters
+# =============================================================================
+ebno_db_min = -2.0  # Low SNR for learning robustness
+ebno_db_max = 10.0  # High SNR for fine-tuning constellation geometry
 training_batch_size = batch_size
 num_training_iterations = 5000
 
-# Learning rate schedules - scales get 100x higher LR
+# Cosine decay schedules: start high, decay to 1% of initial LR
+# TX and scales get higher LR (1e-2) for faster initial adaptation
+# NN weights get lower LR (1e-4) to avoid disrupting pretrained-like behavior
 lr_schedule_tx = tf.keras.optimizers.schedules.CosineDecay(
     initial_learning_rate=1e-2, decay_steps=num_training_iterations, alpha=0.01
 )
@@ -131,15 +214,34 @@ lr_schedule_rx = tf.keras.optimizers.schedules.CosineDecay(
     initial_learning_rate=1e-4, decay_steps=num_training_iterations, alpha=0.01
 )
 
+# Separate Adam optimizers maintain independent momentum for each group
 optimizer_tx = tf.keras.optimizers.Adam(learning_rate=lr_schedule_tx)
 optimizer_scales = tf.keras.optimizers.Adam(learning_rate=lr_schedule_scales)
 optimizer_rx = tf.keras.optimizers.Adam(learning_rate=lr_schedule_rx)
 
+# Gradient accumulation: average gradients over 16 micro-batches
+# This reduces variance and simulates larger batch size without OOM
 accumulation_steps = 16
 
 
+# =============================================================================
+# Training Step Functions
+# =============================================================================
 @tf.function(jit_compile=False)
 def compute_grads_single():
+    """
+    Compute gradients for a single micro-batch.
+
+    Samples random Eb/N0 uniformly for SNR robustness during training.
+    JIT compilation is disabled to avoid recompilation on shape changes.
+
+    Returns
+    -------
+    loss : tf.Tensor
+        Scalar BCE loss for this micro-batch.
+    grads : list of tf.Tensor
+        Gradients for all_vars in the same order.
+    """
     ebno_db = tf.random.uniform(
         shape=[training_batch_size], minval=ebno_db_min, maxval=ebno_db_max
     )
@@ -150,7 +252,23 @@ def compute_grads_single():
 
 
 def compute_accumulated_grads():
-    """Compute accumulated gradients without applying them."""
+    """
+    Compute gradients accumulated over multiple micro-batches.
+
+    Averages gradients from accumulation_steps forward passes to reduce
+    variance. This simulates larger batch training without memory overhead.
+
+    Returns
+    -------
+    avg_loss : tf.Tensor
+        Mean BCE loss over all micro-batches.
+    grads_tx : list of tf.Tensor
+        Averaged gradients for transmitter variables.
+    grads_scales : list of tf.Tensor
+        Averaged gradients for correction scale variables.
+    grads_rx_nn : list of tf.Tensor
+        Averaged gradients for neural network weight variables.
+    """
     accumulated_grads = [tf.zeros_like(v) for v in all_vars]
     total_loss = 0.0
 
@@ -159,10 +277,11 @@ def compute_accumulated_grads():
         accumulated_grads = [ag + g for ag, g in zip(accumulated_grads, grads)]
         total_loss += loss
 
-    # Average
+    # Average over accumulation steps
     accumulated_grads = [g / accumulation_steps for g in accumulated_grads]
     avg_loss = total_loss / accumulation_steps
 
+    # Split into variable groups for separate optimizer application
     grads_tx = accumulated_grads[:n_tx]
     grads_scales = accumulated_grads[n_tx : n_tx + n_scales]
     grads_rx_nn = accumulated_grads[n_tx + n_scales :]
@@ -170,7 +289,9 @@ def compute_accumulated_grads():
     return avg_loss, grads_tx, grads_scales, grads_rx_nn
 
 
-# store loss values for plotting
+# =============================================================================
+# Main Training Loop
+# =============================================================================
 loss_history = []
 
 print(f"Starting {training_mode} training for {num_training_iterations} iterations...")
@@ -182,22 +303,27 @@ for i in range(num_training_iterations):
     loss_history.append(loss_value)
 
     if training_mode == "conventional":
-        # Update all three groups every iteration
+        # Simultaneous update: all variable groups updated together
+        # Simple but can cause instability if TX moves faster than RX adapts
         optimizer_tx.apply_gradients(zip(grads_tx, tx_vars))
         optimizer_scales.apply_gradients(zip(grads_scales, rx_scale_vars))
         optimizer_rx.apply_gradients(zip(grads_rx_nn, nn_rx_vars))
 
     elif training_mode == "two_phase":
-        # 10 RX updates (with fresh gradients each time)
+        # Asymmetric update: RX adapts 10x per TX update
+        # Allows receiver to stabilize before constellation changes
+        # This addresses the ~100x gradient magnitude imbalance (TX << RX)
         for _ in range(10):
+            # Fresh gradients each RX update (not reusing stale grads)
             _, _, grads_scales_fresh, grads_rx_nn_fresh = compute_accumulated_grads()
             optimizer_scales.apply_gradients(zip(grads_scales_fresh, rx_scale_vars))
             optimizer_rx.apply_gradients(zip(grads_rx_nn_fresh, nn_rx_vars))
 
-        # 1 TX update (with fresh gradient after RX has adapted)
+        # Single TX update with fresh gradient after RX has adapted
         _, grads_tx_fresh, _, _ = compute_accumulated_grads()
         optimizer_tx.apply_gradients(zip(grads_tx_fresh, tx_vars))
 
+    # Progress display (overwrite same line)
     print(
         "Iteration {}/{}  BCE: {:.4f}".format(
             i + 1, num_training_iterations, loss_value
@@ -206,14 +332,14 @@ for i in range(num_training_iterations):
         flush=True,
     )
 
-    # Save weights intermittently
+    # Periodic checkpointing to resume from crashes
     if (i + 1) % 1000 == 0:
         os.makedirs("results", exist_ok=True)
         save_path = os.path.join(
             "results", f"PUSCH_autoencoder_weights_{training_mode}_iter_{i + 1}"
         )
 
-        # Get normalized constellation
+        # Store both raw variables and normalized constellation
         normalized_const = (
             model._pusch_transmitter.get_normalized_constellation().numpy()
         )
@@ -232,19 +358,23 @@ for i in range(num_training_iterations):
             pickle.dump(weights_dict, f)
         print(f"[Checkpoint] Saved weights at iteration {i + 1} -> {save_path}")
 
-print()  # newline after the loop
+print()  # Newline after progress display
 
-# Save training loss
+
+# =============================================================================
+# Save Final Results
+# =============================================================================
 os.makedirs("results", exist_ok=True)
-loss_path = os.path.join("results", f"{training_mode}_training_loss.npy")
 
-# Save weights
+# Save loss history for analysis
+loss_path = os.path.join("results", f"{training_mode}_training_loss.npy")
 np.save(loss_path, np.array(loss_history))
+
+# Save final weights
 weights_path = os.path.join(
     "results", f"PUSCH_autoencoder_weights_{training_mode}_training"
 )
 
-# Get normalized constellation
 normalized_const = model._pusch_transmitter.get_normalized_constellation().numpy()
 weights_dict = {
     "tx_weights": [v.numpy() for v in model._pusch_transmitter.trainable_variables],
@@ -261,19 +391,21 @@ print(
     f"{len(weights_dict['rx_weights'])} RX weight arrays"
 )
 
-# Print final scale values
+# Print final correction scale values for analysis
+# These indicate how much the neural network deviates from classical LMMSE
 print("\nFinal correction scales:")
 h_scale = float(rx_scale_vars[0].numpy())
 err_var_scale_raw = float(rx_scale_vars[1].numpy())
-err_var_scale = float(np.log(1 + np.exp(err_var_scale_raw)))
+err_var_scale = float(np.log(1 + np.exp(err_var_scale_raw)))  # softplus
 llr_scale = float(rx_scale_vars[2].numpy())
 print(f"  h_correction_scale: {h_scale:.6f}")
 print(f"  err_var_correction_scale (softplus): {err_var_scale:.6f}")
 print(f"  llr_correction_scale: {llr_scale:.6f}")
 
-# ----------------------------------------
-# Plot training loss vs iteration
-# ----------------------------------------
+
+# =============================================================================
+# Visualization: Training Loss Curve
+# =============================================================================
 plt.figure(figsize=(6, 4))
 plt.plot(loss_history)
 plt.xlabel("Iteration")
@@ -287,16 +419,18 @@ plt.close()
 
 print(f"Saved training loss plot to: {loss_fig_path}")
 
-# ----------------------------------------
-# Constellation before vs after training (overlaid)
-# ----------------------------------------
+
+# =============================================================================
+# Visualization: Constellation Before vs After
+# =============================================================================
+# Compare initial QAM geometry to trained constellation
+# Significant movement indicates the optimizer found channel-adapted points
 trained_const_real = model._pusch_transmitter._points_r
 trained_const_imag = model._pusch_transmitter._points_i
 
 const_init = tf.complex(init_const_real, init_const_imag)
 const_trained = tf.complex(trained_const_real, trained_const_imag)
 
-# Make sure results directory exists
 os.makedirs("results", exist_ok=True)
 
 fig, ax = plt.subplots(figsize=(5, 5))
