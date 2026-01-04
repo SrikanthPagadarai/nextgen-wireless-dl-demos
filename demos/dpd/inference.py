@@ -127,7 +127,8 @@ DPD_LABEL = "NN DPD" if DPD_METHOD == "nn" else "LS DPD"
 WEIGHT_FILE = "nn-dpd-weights" if DPD_METHOD == "nn" else "ls-dpd-weights"
 
 # Output directory for results.
-outdir = Path("results")
+DEMO_DIR = Path(__file__).parent
+outdir = DEMO_DIR / "results"
 outdir.mkdir(parents=True, exist_ok=True)
 
 

@@ -70,7 +70,8 @@ EBN0_DB_MAX = 7
 ber_plots = sn.phy.utils.PlotBER("Advanced neural receiver")
 
 # Results directory (same as training for weight loading)
-outdir = Path("results")
+DEMO_DIR = Path(__file__).parent
+outdir = DEMO_DIR / "results"
 outdir.mkdir(parents=True, exist_ok=True)
 
 # =============================================================================

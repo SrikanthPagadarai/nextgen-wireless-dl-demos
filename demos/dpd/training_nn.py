@@ -149,9 +149,10 @@ LEARNING_RATE = 1e-3  # Adam default works well for most cases.
 # =============================================================================
 # Setup directories
 # =============================================================================
-os.makedirs("results", exist_ok=True)
-os.makedirs("checkpoints", exist_ok=True)
-ckpt_dir = "checkpoints"
+DEMO_DIR = os.path.dirname(os.path.abspath(__file__))
+os.makedirs(os.path.join(DEMO_DIR, "results"), exist_ok=True)
+os.makedirs(os.path.join(DEMO_DIR, "checkpoints"), exist_ok=True)
+ckpt_dir = os.path.join(DEMO_DIR, "checkpoints")
 
 # Create OFDM configuration.
 config = Config(batch_size=BATCH_SIZE)
@@ -321,12 +322,12 @@ open(os.path.join(ckpt_dir, "iter.txt"), "w").write(str(target_iteration))
 # Save loss history (both in checkpoint dir for resumption and results for plotting).
 np.save(os.path.join(ckpt_dir, "loss.npy"), loss_history)
 np.save(
-    os.path.join("results", "loss.npy"),
+    os.path.join(DEMO_DIR, "results", "loss.npy"),
     np.array(loss_history, dtype=np.float32),
 )
 
 # Save pickled weights for inference script compatibility.
-with open(os.path.join("results", "nn-dpd-weights"), "wb") as f:
+with open(os.path.join(DEMO_DIR, "results", "nn-dpd-weights"), "wb") as f:
     pickle.dump(system.get_weights(), f)
 
 print("Saved checkpoints, loss history, and weights.")

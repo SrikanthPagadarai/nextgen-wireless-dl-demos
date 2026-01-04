@@ -46,6 +46,8 @@ import os
 import sys
 import tensorflow as tf
 
+# get directory name of file
+DEMO_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # =============================================================================
 # TensorFlow and GPU Configuration
@@ -209,7 +211,7 @@ for num_bs_ant in NUM_BS_ANT_VALUES:
 
     # Select weights file based on antenna configuration
     weights_filename = f"PUSCH_autoencoder_weights_ant{num_bs_ant}"
-    weights_path = os.path.join("results", weights_filename)
+    weights_path = os.path.join(DEMO_DIR, "results", weights_filename)
     _ = load_model_weights(e2e_model, weights_path, batch_size)
 
     # =========================================================================
@@ -283,10 +285,10 @@ for num_bs_ant in NUM_BS_ANT_VALUES:
     # =========================================================================
     # Save Results
     # =========================================================================
-    os.makedirs("results", exist_ok=True)
+    os.makedirs(os.path.join(DEMO_DIR, "results"), exist_ok=True)
 
     results_filename = f"inference_results_ant{num_bs_ant}.npz"
-    out_path = os.path.join("results", results_filename)
+    out_path = os.path.join(DEMO_DIR, "results", results_filename)
 
     # Include all metadata for reproducibility and plotting
     np.savez(

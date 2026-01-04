@@ -97,9 +97,10 @@ ACCUMULATION_STEPS = 4
 # =============================================================================
 # Directory Setup
 # =============================================================================
-os.makedirs("results", exist_ok=True)
-os.makedirs("checkpoints", exist_ok=True)
-ckpt_dir = "checkpoints"
+DEMO_DIR = os.path.dirname(os.path.abspath(__file__))
+os.makedirs(os.path.join(DEMO_DIR, "results"), exist_ok=True)
+os.makedirs(os.path.join(DEMO_DIR, "checkpoints"), exist_ok=True)
+ckpt_dir = os.path.join(DEMO_DIR, "checkpoints")
 os.makedirs(ckpt_dir, exist_ok=True)
 
 # =============================================================================
@@ -208,6 +209,7 @@ if start_iteration % ACCUMULATION_STEPS != 0:
 if target_iteration % ACCUMULATION_STEPS != 0:
     raise ValueError("target_iteration must be a multiple of ACCUMULATION_STEPS")
 
+# [training-loop-start]
 # =============================================================================
 # Training Loop
 # Gradient accumulation: sum gradients over ACCUMULATION_STEPS, then apply
@@ -241,6 +243,7 @@ for i in range(start_iteration, target_iteration):
         flush=True,
     )
 print("\n\nTraining complete.")
+# [training-loop-end]
 
 # =============================================================================
 # Save Checkpoint and Results
@@ -254,11 +257,11 @@ open(os.path.join(ckpt_dir, "iter.txt"), "w").write(str(target_iteration))
 # Loss history (both in checkpoint dir and results dir)
 np.save(os.path.join(ckpt_dir, "loss.npy"), loss_history)
 np.save(
-    os.path.join("results", "loss.npy"),
+    os.path.join(DEMO_DIR, "results", "loss.npy"),
     np.array(loss_history, dtype=np.float32),
 )
 
 # Pickled weights for easy loading without full checkpoint restore
-with open(os.path.join("results", "mimo-ofdm-neuralrx-weights"), "wb") as f:
+with open(os.path.join(DEMO_DIR, "results", "mimo-ofdm-neuralrx-weights"), "wb") as f:
     pickle.dump(system.get_weights(), f)
 print("Saved checkpoints, loss history, and weights.")

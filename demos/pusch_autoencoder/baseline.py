@@ -43,6 +43,8 @@ from demos.pusch_autoencoder.src.config import Config
 from demos.pusch_autoencoder.src.system import PUSCHLinkE2E
 from demos.pusch_autoencoder.src.cir_manager import CIRManager
 
+# get directory name of file
+DEMO_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # =============================================================================
 # TensorFlow and GPU Configuration
@@ -157,8 +159,10 @@ for num_bs_ant in NUM_BS_ANT_VALUES:
     # Save Results
     # =========================================================================
     # Store results with all parameters needed for reproducibility and plotting
-    os.makedirs("results", exist_ok=True)
-    out_path = os.path.join("results", f"baseline_results_ant{num_bs_ant}.npz")
+    os.makedirs(os.path.join(DEMO_DIR, "results"), exist_ok=True)
+    out_path = os.path.join(
+        DEMO_DIR, "results", f"baseline_results_ant{num_bs_ant}.npz"
+    )
     np.savez(
         out_path,
         ebno_db=ebno_db,

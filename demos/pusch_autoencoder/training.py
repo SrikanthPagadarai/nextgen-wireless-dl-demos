@@ -57,6 +57,9 @@ import time
 
 start = time.time()
 
+# get directory name of file
+DEMO_DIR = os.path.dirname(os.path.abspath(__file__))
+
 
 # =============================================================================
 # Command-Line Argument Parsing
@@ -319,9 +322,9 @@ for i in range(num_training_iterations):
 
     # Periodic checkpointing to resume from crashes
     if (i + 1) % 1000 == 0:
-        os.makedirs("results", exist_ok=True)
+        os.makedirs(os.path.join(DEMO_DIR, "results"), exist_ok=True)
         save_path = os.path.join(
-            "results", f"PUSCH_autoencoder_weights_iter_{i + 1}{ant_suffix}"
+            DEMO_DIR, "results", f"PUSCH_autoencoder_weights_iter_{i + 1}{ant_suffix}"
         )
 
         # Store both raw variables and normalized constellation
@@ -349,14 +352,16 @@ print()  # Newline after progress display
 # =============================================================================
 # Save Final Results
 # =============================================================================
-os.makedirs("results", exist_ok=True)
+os.makedirs(os.path.join(DEMO_DIR, "results"), exist_ok=True)
 
 # Save loss history for analysis
-loss_path = os.path.join("results", f"training_loss{ant_suffix}.npy")
+loss_path = os.path.join(DEMO_DIR, "results", f"training_loss{ant_suffix}.npy")
 np.save(loss_path, np.array(loss_history))
 
 # Save final weights
-weights_path = os.path.join("results", f"PUSCH_autoencoder_weights{ant_suffix}")
+weights_path = os.path.join(
+    DEMO_DIR, "results", f"PUSCH_autoencoder_weights{ant_suffix}"
+)
 
 normalized_const = model._pusch_transmitter.get_normalized_constellation().numpy()
 weights_dict = {
@@ -396,7 +401,7 @@ plt.ylabel("BCE loss")
 plt.title(f"Training loss vs. iteration ({num_bs_ant} BS ant)")
 plt.grid(True, linestyle="--", linewidth=0.5)
 
-loss_fig_path = os.path.join("results", f"training_loss{ant_suffix}.png")
+loss_fig_path = os.path.join(DEMO_DIR, "results", f"training_loss{ant_suffix}.png")
 plt.savefig(loss_fig_path, dpi=150)
 plt.close()
 
@@ -414,7 +419,7 @@ trained_const_imag = model._pusch_transmitter._points_i
 const_init = tf.complex(init_const_real, init_const_imag)
 const_trained = tf.complex(trained_const_real, trained_const_imag)
 
-os.makedirs("results", exist_ok=True)
+os.makedirs(os.path.join(DEMO_DIR, "results"), exist_ok=True)
 
 fig, ax = plt.subplots(figsize=(5, 5))
 
@@ -434,7 +439,7 @@ ax.set_ylabel("Quadrature")
 ax.legend()
 
 fig.tight_layout()
-fig_path = os.path.join("results", f"constellations_overlaid{ant_suffix}.png")
+fig_path = os.path.join(DEMO_DIR, "results", f"constellations_overlaid{ant_suffix}.png")
 plt.savefig(fig_path, dpi=150)
 plt.close(fig)
 

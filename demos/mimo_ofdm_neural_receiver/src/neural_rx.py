@@ -111,6 +111,7 @@ class ResidualBlock(Layer):
             for _ in range(self.num_resnet_layers)
         ]
 
+    # [resblock-call-start]
     def call(self, inputs):
         """
         Apply residual transformation to input tensor.
@@ -149,6 +150,8 @@ class ResidualBlock(Layer):
             z = conv(z)
         # Skip connection: enables gradient flow and residual learning
         return z + inputs
+
+    # [resblock-call-end]
 
 
 class NeuralRx(Layer):

@@ -60,7 +60,8 @@ import matplotlib.pyplot as plt  # noqa: E402
 from pathlib import Path  # noqa: E402
 
 # Directory containing input data and output plots.
-RESULTS_DIR = Path("results")
+DEMO_DIR = Path(__file__).parent
+RESULTS_DIR = DEMO_DIR / "results"
 
 
 def plot_coefficient_convergence():

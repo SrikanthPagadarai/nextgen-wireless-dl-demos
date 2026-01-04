@@ -33,11 +33,12 @@ import matplotlib.pyplot as plt
 # =============================================================================
 # File Paths
 # =============================================================================
-BASELINE_FILE = os.path.join("results", "baseline_results_cdlC.npz")
-INFERENCE_FILE = os.path.join("results", "inference_results.npz")
-LOSS_FILE = os.path.join("results", "loss.npy")
+DEMO_DIR = os.path.dirname(os.path.abspath(__file__))
+BASELINE_FILE = os.path.join(DEMO_DIR, "results", "baseline_results_cdlC.npz")
+INFERENCE_FILE = os.path.join(DEMO_DIR, "results", "inference_results.npz")
+LOSS_FILE = os.path.join(DEMO_DIR, "results", "loss.npy")
 
-os.makedirs("results", exist_ok=True)
+os.makedirs(os.path.join(DEMO_DIR, "results"), exist_ok=True)
 
 # =============================================================================
 # Load Data
@@ -61,7 +62,7 @@ inf_bler = inf["bler"]
 # =============================================================================
 if os.path.exists(LOSS_FILE):
     loss = np.load(LOSS_FILE)
-    outfile = os.path.join("results", "training_loss.png")
+    outfile = os.path.join(DEMO_DIR, "results", "training_loss.png")
     plt.figure()
     plt.semilogy(loss)
     plt.xlabel("iteration")
@@ -78,7 +79,7 @@ else:
 # BER Plot
 # Compares baseline (perfect/imperfect CSI) with neural receiver
 # =============================================================================
-outfile_ber = os.path.join("results", "ber_cdlC.png")
+outfile_ber = os.path.join(DEMO_DIR, "results", "ber_cdlC.png")
 plt.figure()
 plt.xlabel(r"$E_b/N_0$ (dB)")
 plt.ylabel("BER")
@@ -106,7 +107,7 @@ print(f"Saved BER plot to {outfile_ber}")
 # BLER Plot
 # Compares baseline (perfect/imperfect CSI) with neural receiver
 # =============================================================================
-outfile_bler = os.path.join("results", "bler_cdlC.png")
+outfile_bler = os.path.join(DEMO_DIR, "results", "bler_cdlC.png")
 plt.figure()
 plt.xlabel(r"$E_b/N_0$ (dB)")
 plt.ylabel("BLER")

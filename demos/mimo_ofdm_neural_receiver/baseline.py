@@ -108,7 +108,8 @@ print(f"Total duration: {dur_min:.2f} min")
 # =============================================================================
 # Save Results
 # =============================================================================
-out_dir = "results"
+DEMO_DIR = os.path.dirname(os.path.abspath(__file__))
+out_dir = os.path.join(DEMO_DIR, "results")
 os.makedirs(out_dir, exist_ok=True)
 
 outfile = os.path.join(out_dir, "all_baseline_results_cdlC.npz")

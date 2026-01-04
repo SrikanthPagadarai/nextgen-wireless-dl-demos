@@ -118,6 +118,7 @@ class Config:
     speed: float = 0.0  # m/s (UE speed)
     num_bits_per_symbol: BitsPerSym = BitsPerSym.QPSK
 
+    # [phy-parameters-start]
     # =========================================================================
     # Hard-coded PHY/system parameters
     # These define the physical layer configuration and should not be modified
@@ -169,6 +170,7 @@ class Config:
 
     # Fixed seed for reproducible channel/noise realizations
     _seed: int = field(init=False, default=42, repr=False)
+    # [phy-parameters-end]
 
     # =========================================================================
     # Derived system parameters (computed by build())

@@ -151,7 +151,8 @@ args = parser.parse_args()
 # Setup
 # =============================================================================
 # Create output directory for results.
-os.makedirs("results", exist_ok=True)
+DEMO_DIR = os.path.dirname(os.path.abspath(__file__))
+os.makedirs(os.path.join(DEMO_DIR, "results"), exist_ok=True)
 
 # Create OFDM configuration with specified batch size.
 config = Config(batch_size=args.batch_size)
@@ -211,13 +212,13 @@ print("\nLS-DPD learning complete.")
 # Save Results
 # =============================================================================
 # Save model weights (includes DPD coefficients and any other state).
-weights_file = os.path.join("results", "ls-dpd-weights")
+weights_file = os.path.join(DEMO_DIR, "results", "ls-dpd-weights")
 with open(weights_file, "wb") as f:
     pickle.dump(system.get_weights(), f)
 print(f"Saved weights to {weights_file}")
 
 # Save coefficient history for convergence analysis and plotting.
-coeff_history_file = os.path.join("results", "ls-dpd-coeff-history.npy")
+coeff_history_file = os.path.join(DEMO_DIR, "results", "ls-dpd-coeff-history.npy")
 np.save(coeff_history_file, result["coeff_history"])
 print(f"Saved coefficient history to {coeff_history_file}")
 print("Run 'python plots_ls.py' to generate plots.")

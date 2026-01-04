@@ -37,7 +37,7 @@ Typical usage follows two phases:
     cfg = Config(num_bs_ant=16)  # or 32
     manager = CIRManager(config=cfg)
     a, tau = manager.load_from_tfrecord(group_for_mumimo=True)
-    # Loads from ../cir_tfrecords_ant16 (or ant32)
+    # Loads from demos/pusch_autoencoder/cir_tfrecords_ant16 (or ant32)
     # a: [num_mu_samples, 1, 16, 4, 4, max_paths, 14]
     # tau: [num_mu_samples, 1, 4, max_paths]
 """
@@ -59,6 +59,9 @@ from sionna.rt import (
 
 from .config import Config
 from .cir_generator import CIRGenerator
+
+# get directory name of file
+DEMO_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 # =============================================================================
@@ -590,7 +593,7 @@ class CIRManager:
         ----------
         tfrecord_dir : str, optional
             Directory containing TFRecord files, relative to this module.
-            If not provided, defaults to ``../cir_tfrecords_ant{num_bs_ant}``.
+            If not provided, defaults to ``cir_tfrecords_ant{num_bs_ant}`` within the demo directory.
         group_for_mumimo : bool
             If ``True``, groups ``num_ue`` individual CIRs into MU-MIMO samples.
             This simulates co-scheduled uplink transmissions.
@@ -621,9 +624,11 @@ class CIRManager:
         """
         # Default directory includes antenna count
         if tfrecord_dir is None:
-            tfrecord_dir = f"../cir_tfrecords_ant{self.num_bs_ant}"
-
-        cir_dir = os.path.join(os.path.dirname(__file__), tfrecord_dir)
+            cir_dir = os.path.join(DEMO_DIR, f"cir_tfrecords_ant{self.num_bs_ant}")
+        elif os.path.isabs(tfrecord_dir):
+            cir_dir = tfrecord_dir
+        else:
+            cir_dir = os.path.join(DEMO_DIR, tfrecord_dir)
         cir_files = tf.io.gfile.glob(os.path.join(cir_dir, "*.tfrecord"))
 
         if not cir_files:
@@ -731,7 +736,7 @@ class CIRManager:
             OFDM symbols per slot. Default from config.
         tfrecord_dir : str, optional
             Directory containing TFRecord files.
-            If not provided, defaults to ``../cir_tfrecords_ant{num_bs_ant}``.
+            If not provided, defaults to ``cir_tfrecords_ant{num_bs_ant}`` within the demo directory.
 
         Returns
         -------
@@ -827,7 +832,7 @@ class CIRManager:
             Each seed produces a separate TFRecord file.
         tfrecord_dir : str, optional
             Output directory for TFRecord files (relative to this module).
-            If not provided, defaults to ``../cir_tfrecords_ant{num_bs_ant}``.
+            If not provided, defaults to ``cir_tfrecords_ant{num_bs_ant}`` within the demo directory.
         save_radio_map : bool
             If ``True``, saves radio map and UE position visualizations.
 
@@ -851,7 +856,7 @@ class CIRManager:
         """
         # Default directory includes antenna count for separation
         if tfrecord_dir is None:
-            tfrecord_dir = f"../cir_tfrecords_ant{self.num_bs_ant}"
+            tfrecord_dir = os.path.join(DEMO_DIR, f"cir_tfrecords_ant{self.num_bs_ant}")
         # Normalize input to list
         if isinstance(seed_offsets, (int, np.integer)):
             seed_list = [int(seed_offsets)]
@@ -868,8 +873,10 @@ class CIRManager:
         need_ue_viz = save_radio_map
 
         # Create output directory (relative to this module file)
-        base_dir = os.path.dirname(__file__)
-        cir_dir = os.path.join(base_dir, tfrecord_dir)
+        if os.path.isabs(tfrecord_dir):
+            cir_dir = tfrecord_dir
+        else:
+            cir_dir = os.path.join(DEMO_DIR, tfrecord_dir)
         os.makedirs(cir_dir, exist_ok=True)
 
         # Track maximum path count across all files for documentation

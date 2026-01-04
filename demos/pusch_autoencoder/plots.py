@@ -55,6 +55,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from demos.pusch_autoencoder.src.config import Config
 
+# get directory name of file
+DEMO_DIR = os.path.dirname(os.path.abspath(__file__))
+
 
 # =============================================================================
 # Constellation Utilities
@@ -140,7 +143,9 @@ for num_bs_ant in NUM_BS_ANT_VALUES:
     # Load Results Data
     # =========================================================================
     # Baseline results (from baseline.py)
-    baseline_path = os.path.join("results", f"baseline_results{ant_suffix}.npz")
+    baseline_path = os.path.join(
+        DEMO_DIR, "results", f"baseline_results{ant_suffix}.npz"
+    )
     if not os.path.exists(baseline_path):
         print(
             f"Warning: {baseline_path} not found. "
@@ -149,7 +154,9 @@ for num_bs_ant in NUM_BS_ANT_VALUES:
         continue
 
     # Autoencoder inference results (from inference.py)
-    inference_path = os.path.join("results", f"inference_results{ant_suffix}.npz")
+    inference_path = os.path.join(
+        DEMO_DIR, "results", f"inference_results{ant_suffix}.npz"
+    )
     if not os.path.exists(inference_path):
         print(
             f"Warning: {inference_path} not found. "
@@ -193,6 +200,7 @@ for num_bs_ant in NUM_BS_ANT_VALUES:
     plt.legend()
 
     outfile = os.path.join(
+        DEMO_DIR,
         "results",
         f"bler_plot_bs{batch_size}_ue{num_ue}_ant{num_bs_ant}x{num_ue_ant}.png",
     )
@@ -203,7 +211,7 @@ for num_bs_ant in NUM_BS_ANT_VALUES:
     # =========================================================================
     # Training Loss Analysis
     # =========================================================================
-    loss_path = os.path.join("results", f"training_loss{ant_suffix}.npy")
+    loss_path = os.path.join(DEMO_DIR, "results", f"training_loss{ant_suffix}.npy")
     if os.path.exists(loss_path):
         loss_values = np.load(loss_path)
 
@@ -235,7 +243,9 @@ for num_bs_ant in NUM_BS_ANT_VALUES:
         )
         plt.legend()
 
-        loss_outfile = os.path.join("results", f"training_loss{ant_suffix}.png")
+        loss_outfile = os.path.join(
+            DEMO_DIR, "results", f"training_loss{ant_suffix}.png"
+        )
         plt.savefig(loss_outfile, dpi=150, bbox_inches="tight")
         plt.close()
         print(f"Saved loss plot to {loss_outfile}")
@@ -246,7 +256,7 @@ for num_bs_ant in NUM_BS_ANT_VALUES:
     # Load Final Trained Weights
     # =========================================================================
     final_weights_path = os.path.join(
-        "results", f"PUSCH_autoencoder_weights{ant_suffix}"
+        DEMO_DIR, "results", f"PUSCH_autoencoder_weights{ant_suffix}"
     )
     if not os.path.exists(final_weights_path):
         print(f"Warning: {final_weights_path} not found, skipping constellation plots.")
@@ -301,7 +311,9 @@ for num_bs_ant in NUM_BS_ANT_VALUES:
     ax.set_title(f"Normalized Constellation: Standard vs Trained ({num_bs_ant} BS Ant)")
     ax.legend()
 
-    const_outfile = os.path.join("results", f"constellation_normalized{ant_suffix}.png")
+    const_outfile = os.path.join(
+        DEMO_DIR, "results", f"constellation_normalized{ant_suffix}.png"
+    )
     fig.savefig(const_outfile, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"Saved constellation plot to {const_outfile}")
@@ -315,7 +327,9 @@ for num_bs_ant in NUM_BS_ANT_VALUES:
 
     for iteration in iterations:
         weights_path = os.path.join(
-            "results", f"PUSCH_autoencoder_weights_iter_{iteration}{ant_suffix}"
+            DEMO_DIR,
+            "results",
+            f"PUSCH_autoencoder_weights_iter_{iteration}{ant_suffix}",
         )
 
         if not os.path.exists(weights_path):
@@ -350,7 +364,7 @@ for num_bs_ant in NUM_BS_ANT_VALUES:
         ax.legend()
 
         iter_outfile = os.path.join(
-            "results", f"constellation_iter_{iteration}{ant_suffix}.png"
+            DEMO_DIR, "results", f"constellation_iter_{iteration}{ant_suffix}.png"
         )
         fig.savefig(iter_outfile, dpi=150, bbox_inches="tight")
         plt.close(fig)
