@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Deep learning demos for B5G/6G wireless systems using TensorFlow and [Sionna](https://nvlabs.github.io/sionna/).
+Deep learning demos for 5G/6G wireless systems using TensorFlow and [Sionna](https://nvlabs.github.io/sionna/).
 
 ⚠️ **Note:** This project is under active development and not accepting external contributions at this time.
 
@@ -12,9 +12,9 @@ This repository contains neural network-based demos for 5G/6G communication syst
 
 | Demo | Description |
 |------|-------------|
-| **dpd** | Digital Pre-Distortion for power amplifier linearization (NN and LS methods) |
-| **mimo_ofdm_neural_receiver** | Neural receiver for MIMO-OFDM systems with learned channel estimation and equalization |
-| **pusch_autoencoder** | End-to-end autoencoder for 5G NR PUSCH with trainable constellation and neural detector |
+| **Digital Pre-Distortion** | Digital Pre-Distortion for power amplifier linearization |
+| **MIMO-OFDM Neural Receiver** | Neural receiver for MIMO-OFDM systems with learned channel estimation and equalization |
+| **Site-Specific PUSCH Autoencoder** | End-to-end autoencoder for 5G NR PUSCH with trainable constellation and neural detector |
 
 ## Project Structure
 
@@ -34,6 +34,7 @@ sionna-dl-6g/
 │
 ├── demos/
 │   ├── dpd/                              # Digital Pre-Distortion demo
+│   │   ├── results/                      # Performance results
 │   │   ├── src/
 │   │   │   ├── config.py                 # System configuration
 │   │   │   ├── tx.py                     # OFDM transmitter
@@ -53,6 +54,7 @@ sionna-dl-6g/
 │   │   └── plots_nn.py                   # NN-DPD visualization
 │   │
 │   ├── mimo_ofdm_neural_receiver/        # Neural MIMO-OFDM receiver demo
+│   │   ├── results/                      # Performance results
 │   │   ├── src/
 │   │   │   ├── config.py                 # System configuration
 │   │   │   ├── tx.py                     # Transmitter chain
@@ -62,13 +64,13 @@ sionna-dl-6g/
 │   │   │   ├── neural_rx.py              # Neural receiver network
 │   │   │   └── system.py                 # End-to-end system
 │   │   ├── tests/                        # Unit tests
-│   │   ├── results/                      # Pre-computed baseline results
 │   │   ├── training.py                   # Neural receiver training
 │   │   ├── inference.py                  # Trained model evaluation
 │   │   ├── baseline.py                   # Baseline receiver evaluation
 │   │   └── plots.py                      # BER/BLER visualization
 │   │
 │   └── pusch_autoencoder/                # PUSCH autoencoder demo
+│   │   ├── results/                      # Performance results
 │       ├── src/
 │       │   ├── config.py                 # System configuration
 │       │   ├── pusch_trainable_transmitter.py  # Trainable constellation TX
