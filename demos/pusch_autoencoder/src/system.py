@@ -66,6 +66,9 @@ class PUSCHLinkE2E(tf.keras.Model):
     const_d_min : float
         Minimum distance threshold for constellation regularization. Points
         closer than this distance incur a penalty.
+    config : Config, optional
+        System configuration. Defaults to ``Config()`` if not provided.
+        Use this to customize system parameters like ``num_bs_ant``.
 
     Notes
     -----
@@ -117,6 +120,7 @@ class PUSCHLinkE2E(tf.keras.Model):
         training=False,
         const_reg_weight=0.1,
         const_d_min=0.35,
+        config=None,
     ):
         super().__init__()
 
@@ -132,7 +136,8 @@ class PUSCHLinkE2E(tf.keras.Model):
         self._use_autoencoder = use_autoencoder
 
         # Centralized config to enforce a single system configuration
-        self._cfg = Config()
+        # Use provided config or create default
+        self._cfg = config if config is not None else Config()
 
         # Cache frequently-used config values for cleaner code
         self._num_prb = self._cfg.num_prb

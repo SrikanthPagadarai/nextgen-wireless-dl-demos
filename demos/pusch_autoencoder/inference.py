@@ -6,10 +6,7 @@ Rate (BLER) and Bit Error Rate (BER) performance. Results can be compared
 against the baseline (baseline.py) to quantify the improvement from neural
 detection and learned constellation geometry.
 
-The script supports evaluation of models trained with either training mode:
-
-- **conventional**: Simultaneous TX/RX updates
-- **two_phase**: Asymmetric 10:1 RX:TX update ratio
+The script runs inference for multiple BS antenna configurations (16 and 32).
 
 Evaluation Pipeline
 -------------------
@@ -22,14 +19,14 @@ Weight Loading
 --------------
 The script expects weights saved by training.py in the format::
 
-    results/PUSCH_autoencoder_weights_{mode}_training
+    results/PUSCH_autoencoder_weights_ant{num_bs_ant}
 
 If weights are not found, the script continues with random initialization
 (useful for debugging, but results will be meaningless).
 
 Output
 ------
-Results are saved to ``results/inference_results_{mode}.npz`` containing:
+Results are saved to ``results/inference_results_ant{num_bs_ant}.npz`` containing:
 
 - ``ebno_db``: Eb/N0 sweep values in dB
 - ``ber``: Bit error rates
@@ -40,8 +37,7 @@ Usage
 -----
 Run from the repository root after training::
 
-    python -m demos.pusch_autoencoder.inference conventional
-    python -m demos.pusch_autoencoder.inference two_phase
+    python -m demos.pusch_autoencoder.inference
 
 Then use plots.py to compare against baseline results.
 """
@@ -87,16 +83,6 @@ from sionna.phy.utils import PlotBER  # noqa: E402
 from demos.pusch_autoencoder.src.config import Config  # noqa: E402
 from demos.pusch_autoencoder.src.system import PUSCHLinkE2E  # noqa: E402
 from demos.pusch_autoencoder.src.cir_manager import CIRManager  # noqa: E402
-
-
-# =============================================================================
-# Command-Line Argument Parsing
-# =============================================================================
-if len(sys.argv) != 2 or sys.argv[1] not in ("conventional", "two_phase"):
-    print("Usage: python inference.py [conventional|two_phase]")
-    sys.exit(1)
-
-mode = sys.argv[1]
 
 
 # =============================================================================
@@ -187,138 +173,139 @@ def load_model_weights(
 
 
 # =============================================================================
-# System Configuration and Channel Model
+# Parametrized BS Antenna Configurations
 # =============================================================================
-_cfg = Config()
-batch_size = _cfg.batch_size
-num_ue = _cfg.num_ue
-num_bs_ant = _cfg.num_bs_ant
-num_ue_ant = _cfg.num_ue_ant
-num_time_steps = _cfg.num_time_steps
+NUM_BS_ANT_VALUES = [16, 32]
 
-cir_manager = CIRManager()
-# Use same CIR loading as training.py for consistent channel distribution
-channel_model = cir_manager.load_from_tfrecord(group_for_mumimo=True)
+for num_bs_ant in NUM_BS_ANT_VALUES:
+    print(f"\n{'='*60}")
+    print(f"Running inference with num_bs_ant = {num_bs_ant}")
+    print(f"{'='*60}\n")
 
+    # =========================================================================
+    # System Configuration and Channel Model
+    # =========================================================================
+    _cfg = Config(num_bs_ant=num_bs_ant)
+    batch_size = _cfg.batch_size
+    num_ue = _cfg.num_ue
+    num_ue_ant = _cfg.num_ue_ant
+    num_time_steps = _cfg.num_time_steps
 
-# =============================================================================
-# Model Instantiation
-# =============================================================================
-# Create model in inference mode (training=False returns decoded bits, not LLRs)
-e2e_model = PUSCHLinkE2E(
-    channel_model,
-    perfect_csi=False,
-    use_autoencoder=True,
-    training=False,  # Inference mode: full TB decoding for BER evaluation
-)
+    cir_manager = CIRManager(config=_cfg)
+    # Use same CIR loading as training.py for consistent channel distribution
+    channel_model = cir_manager.load_from_tfrecord(group_for_mumimo=True)
 
-# Select weights file based on training mode
-if mode == "conventional":
-    weights_filename = "PUSCH_autoencoder_weights_conventional_training"
-else:  # mode == "two_phase"
-    weights_filename = "PUSCH_autoencoder_weights_two_phase_training"
+    # =========================================================================
+    # Model Instantiation
+    # =========================================================================
+    # Create model in inference mode (training=False returns decoded bits, not LLRs)
+    e2e_model = PUSCHLinkE2E(
+        channel_model,
+        perfect_csi=False,
+        use_autoencoder=True,
+        training=False,  # Inference mode: full TB decoding for BER evaluation
+        config=_cfg,
+    )
 
-weights_path = os.path.join("results", weights_filename)
-_ = load_model_weights(e2e_model, weights_path, batch_size)
+    # Select weights file based on antenna configuration
+    weights_filename = f"PUSCH_autoencoder_weights_ant{num_bs_ant}"
+    weights_path = os.path.join("results", weights_filename)
+    _ = load_model_weights(e2e_model, weights_path, batch_size)
 
+    # =========================================================================
+    # Quick Functional Check
+    # =========================================================================
+    # Verify the model runs correctly with loaded weights before long simulation
+    ebno_db_test = tf.fill([batch_size], 10.0)  # Vector shape matches training
+    b_test, b_hat_test = e2e_model(batch_size, ebno_db_test)
+    print("Quick check shapes (autoencoder inference):", b_test.shape, b_hat_test.shape)
 
-# =============================================================================
-# Quick Functional Check
-# =============================================================================
-# Verify the model runs correctly with loaded weights before long simulation
-ebno_db_test = tf.fill([batch_size], 10.0)  # Vector shape matches training
-b_test, b_hat_test = e2e_model(batch_size, ebno_db_test)
-print("Quick check shapes (autoencoder inference):", b_test.shape, b_hat_test.shape)
+    # =========================================================================
+    # PlotBER Adapter
+    # =========================================================================
+    def ae_model_for_ber(batch_size, ebno_db):
+        """
+        Adapter to match PlotBER's calling convention to PUSCHLinkE2E's interface.
 
+        PlotBER.simulate() calls the model with scalar Eb/N0 values, but our
+        PUSCHLinkE2E expects a vector of shape ``[batch_size]`` (matching
+        training behavior where each sample can have different SNR).
 
-# =============================================================================
-# PlotBER Adapter
-# =============================================================================
-def ae_model_for_ber(batch_size, ebno_db):
-    """
-    Adapter to match PlotBER's calling convention to PUSCHLinkE2E's interface.
+        Parameters
+        ----------
+        batch_size : int
+            Number of samples per batch.
+        ebno_db : tf.Tensor
+            Eb/N0 value, either scalar or vector.
 
-    PlotBER.simulate() calls the model with scalar Eb/N0 values, but our
-    PUSCHLinkE2E expects a vector of shape ``[batch_size]`` (matching
-    training behavior where each sample can have different SNR).
+        Returns
+        -------
+        tuple of (b, b_hat)
+            Ground-truth and decoded information bits.
+        """
+        ebno_db = tf.cast(ebno_db, tf.float32)
 
-    Parameters
-    ----------
-    batch_size : int
-        Number of samples per batch.
-    ebno_db : tf.Tensor
-        Eb/N0 value, either scalar or vector.
+        # Expand scalar to vector if needed
+        if ebno_db.shape.rank == 0:
+            ebno_vec = tf.fill([batch_size], ebno_db)
+        else:
+            ebno_vec = ebno_db
 
-    Returns
-    -------
-    tuple of (b, b_hat)
-        Ground-truth and decoded information bits.
-    """
-    ebno_db = tf.cast(ebno_db, tf.float32)
+        return e2e_model(batch_size, ebno_vec)
 
-    # Expand scalar to vector if needed
-    if ebno_db.shape.rank == 0:
-        ebno_vec = tf.fill([batch_size], ebno_db)
-    else:
-        ebno_vec = ebno_db
+    # =========================================================================
+    # BER/BLER Monte Carlo Simulation
+    # =========================================================================
+    # Same Eb/N0 range as baseline.py for direct comparison
+    ebno_db = np.arange(-2, 10, 1)
 
-    return e2e_model(batch_size, ebno_vec)
+    ber_plot = PlotBER(f"PUSCH Autoencoder Inference ({num_bs_ant} BS Antennas)")
 
+    # Use wrapper function that handles scalar->vector Eb/N0 conversion
+    # Fewer iterations than baseline (50 vs 500) since we just need rough comparison
+    ber, bler = ber_plot.simulate(
+        ae_model_for_ber,
+        ebno_dbs=ebno_db,
+        max_mc_iter=50,  # Reduced iterations for faster inference evaluation
+        num_target_block_errors=200,  # Lower target for faster convergence
+        batch_size=batch_size,
+        soft_estimates=False,  # Hard-decision BER after LDPC decoding
+        show_fig=False,
+        add_bler=True,
+    )
 
-# =============================================================================
-# BER/BLER Monte Carlo Simulation
-# =============================================================================
-# Same Eb/N0 range as baseline.py for direct comparison
-ebno_db = np.arange(-2, 10, 1)
+    # Convert to NumPy for storage
+    if hasattr(ber, "numpy"):
+        ber = ber.numpy()
+    if hasattr(bler, "numpy"):
+        bler = bler.numpy()
 
-ber_plot = PlotBER("PUSCH Autoencoder Inference (Trained)")
+    # =========================================================================
+    # Save Results
+    # =========================================================================
+    os.makedirs("results", exist_ok=True)
 
-# Use wrapper function that handles scalar->vector Eb/N0 conversion
-# Fewer iterations than baseline (50 vs 500) since we just need rough comparison
-ber, bler = ber_plot.simulate(
-    ae_model_for_ber,
-    ebno_dbs=ebno_db,
-    max_mc_iter=50,  # Reduced iterations for faster inference evaluation
-    num_target_block_errors=200,  # Lower target for faster convergence
-    batch_size=batch_size,
-    soft_estimates=False,  # Hard-decision BER after LDPC decoding
-    show_fig=False,
-    add_bler=True,
-)
+    results_filename = f"inference_results_ant{num_bs_ant}.npz"
+    out_path = os.path.join("results", results_filename)
 
-# Convert to NumPy for storage
-if hasattr(ber, "numpy"):
-    ber = ber.numpy()
-if hasattr(bler, "numpy"):
-    bler = bler.numpy()
+    # Include all metadata for reproducibility and plotting
+    np.savez(
+        out_path,
+        ebno_db=ebno_db,
+        ber=ber,
+        bler=bler,
+        batch_size=batch_size,
+        num_ue=num_ue,
+        num_bs_ant=num_bs_ant,
+        num_ue_ant=num_ue_ant,
+        num_time_steps=num_time_steps,
+        perfect_csi=False,
+        use_autoencoder=True,
+        training=False,
+    )
 
+    print(f"Saved autoencoder BER/BLER inference results to {out_path}")
 
-# =============================================================================
-# Save Results
-# =============================================================================
-os.makedirs("results", exist_ok=True)
-
-if mode == "conventional":
-    results_filename = "inference_results_conventional.npz"
-else:  # mode == "two_phase"
-    results_filename = "inference_results_two_phase.npz"
-
-out_path = os.path.join("results", results_filename)
-
-# Include all metadata for reproducibility and plotting
-np.savez(
-    out_path,
-    ebno_db=ebno_db,
-    ber=ber,
-    bler=bler,
-    batch_size=batch_size,
-    num_ue=num_ue,
-    num_bs_ant=num_bs_ant,
-    num_ue_ant=num_ue_ant,
-    num_time_steps=num_time_steps,
-    perfect_csi=False,
-    use_autoencoder=True,
-    training=False,
-)
-
-print(f"Saved autoencoder BER/BLER inference results to {out_path}")
+print("\n" + "=" * 60)
+print("Inference complete for all antenna configurations.")
+print("=" * 60)

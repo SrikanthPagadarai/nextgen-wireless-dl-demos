@@ -11,7 +11,7 @@ def test_config_initialization():
     assert cfg.num_ue == 4
     assert cfg.num_bs == 1
     assert cfg.num_ue_ant == 4
-    assert cfg.num_bs_ant == 16
+    assert cfg.num_bs_ant == 16  # Default value
 
     # Test PUSCH parameters
     assert cfg.num_prb == 16
@@ -25,6 +25,29 @@ def test_config_initialization():
     print(f"  Num UE: {cfg.num_ue}, Num BS: {cfg.num_bs}")
     print(f"  UE antennas: {cfg.num_ue_ant}, BS antennas: {cfg.num_bs_ant}")
     print(f"  MCS index: {cfg.mcs_index}, MCS table: {cfg.mcs_table}")
+
+
+def test_config_num_bs_ant_configurable():
+    """Test that num_bs_ant can be set at initialization."""
+    # Test custom values
+    cfg_32 = Config(num_bs_ant=32)
+    assert cfg_32.num_bs_ant == 32
+
+    cfg_8 = Config(num_bs_ant=8)
+    assert cfg_8.num_bs_ant == 8
+
+    cfg_64 = Config(num_bs_ant=64)
+    assert cfg_64.num_bs_ant == 64
+
+    # Verify default still works
+    cfg_default = Config()
+    assert cfg_default.num_bs_ant == 16
+
+    print("\n[Config num_bs_ant Configurable]:")
+    print(f"  Default: {cfg_default.num_bs_ant}")
+    print(f"  Custom (32): {cfg_32.num_bs_ant}")
+    print(f"  Custom (8): {cfg_8.num_bs_ant}")
+    print(f"  Custom (64): {cfg_64.num_bs_ant}")
 
 
 def test_config_mcs_decoding():

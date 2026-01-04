@@ -23,13 +23,22 @@ class Config:
     consistency across CIR generation, model instantiation, training, and
     inference. Parameters are intentionally non-configurable at instantiation
     (``init=False``) to enforce a single, validated system configuration.
+    The number of BS antennas (``num_bs_ant``) is configurable
+    to allow flexibility in array size.
 
     The configuration defines a MU-MIMO uplink scenario with:
 
     - 4 UEs, each with 4 antennas (cross-polarized)
-    - 1 BS with 32 antennas (cross-polarized)
+    - 1 BS with configurable antennas (default 16, cross-polarized)
     - 16-QAM modulation (MCS index 14, table 1)
     - Site- (Munich-) specific ray-traced channel
+
+    Parameters
+    ----------
+    num_bs_ant : int, optional
+        Number of BS antennas (cross-polarized array). Must be even since
+        the antenna array uses cross-polarization (num_cols = num_bs_ant // 2).
+        Default is 16.
 
     Notes
     -----
@@ -47,6 +56,9 @@ class Config:
     4
     >>> print(cfg.num_ue, cfg.num_bs_ant)
     4 16
+    >>> cfg_32ant = Config(num_bs_ant=32)
+    >>> print(cfg_32ant.num_bs_ant)
+    32
 
     Notes
     -----
@@ -54,6 +66,14 @@ class Config:
     and ``pi2bpsk=False``, which is appropriate for standard PUSCH without
     DFT-s-OFDM transform precoding at the physical layer.
     """
+
+    # =========================================================================
+    # User-Configurable Parameters
+    # =========================================================================
+    # Number of BS antennas (cross-polarized). Default 16 provides sufficient
+    # spatial DoF to separate 4 single-layer UE streams with reasonable margin.
+    # Must be even since the antenna array uses cross-polarization.
+    num_bs_ant: int = 16
 
     # =========================================================================
     # OFDM / Slot Structure
@@ -79,10 +99,6 @@ class Config:
     # 4 UE antennas (2x2 cross-polarized) matches typical smartphone designs
     # and enables spatial multiplexing on the uplink.
     _num_ue_ant: int = field(init=False, default=4, repr=False)
-
-    # 32 BS antennas (16x2 cross-polarized) provides sufficient spatial DoF
-    # to separate 4 single-layer UE streams with reasonable margin.
-    _num_bs_ant: int = field(init=False, default=32, repr=False)
 
     # =========================================================================
     # CIR Generation Parameters
@@ -257,11 +273,6 @@ class Config:
     def num_ue_ant(self) -> int:
         """int: Number of antennas per UE (4 = 2x2 cross-polarized array)."""
         return self._num_ue_ant
-
-    @property
-    def num_bs_ant(self) -> int:
-        """int: Number of BS antennas (32 = 16x2 cross-polarized array)."""
-        return self._num_bs_ant
 
     # =========================================================================
     # Read-Only Properties: CIR Generation
