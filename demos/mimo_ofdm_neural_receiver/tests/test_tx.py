@@ -1,7 +1,6 @@
 import pytest
 import tensorflow as tf
 from demos.mimo_ofdm_neural_receiver.src.config import Config, BitsPerSym
-from demos.mimo_ofdm_neural_receiver.src.csi import CSI
 from demos.mimo_ofdm_neural_receiver.src.tx import Tx
 
 # Dimension reference for TX outputs:
@@ -28,10 +27,8 @@ def test_tx(modulation):
     cfg = Config(num_bits_per_symbol=modulation)
     batch_size = tf.constant(4, dtype=tf.int32)
 
-    csi = CSI(cfg)
-    h_freq = csi.build(batch_size)
     tx = Tx(cfg)
-    out = tx(batch_size, h_freq)
+    out = tx(batch_size)
 
     # Expected dimensions from config
     expected = {
