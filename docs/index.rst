@@ -1,10 +1,10 @@
-Sionna DL 6G Demos
+Sionna DL 5G/6G Demos
 ==================
 
-Deep Learning Demos for B5G/6G Using TensorFlow and Sionna.
+Deep Learning Demos for 5G/6G Using TensorFlow and Sionna.
 
-This project provides hands-on demonstrations of deep learning techniques applied to
-beyond-5G and 6G wireless communication systems, built on NVIDIA's
+This project summarizes some exploratory demos of deep learning techniques applied to
+5G and 6G wireless communication systems, developed using NVIDIA's
 `Sionna <https://nvlabs.github.io/sionna/>`_ library.
 
 .. toctree::
@@ -18,20 +18,15 @@ beyond-5G and 6G wireless communication systems, built on NVIDIA's
    :maxdepth: 2
    :caption: Demos
 
+   demos/dpd
    demos/mimo_ofdm_neural_receiver
    demos/pusch_autoencoder
 
 .. toctree::
    :maxdepth: 2
-   :caption: Reference
+   :caption: Module Reference
 
    api/index
-
-.. toctree::
-   :maxdepth: 1
-   :caption: Development
-
-   contributing
    changelog
 
 
