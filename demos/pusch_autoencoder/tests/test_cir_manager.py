@@ -43,6 +43,20 @@ def test_cir_manager_initialization_with_custom_config():
     print(f"  Config object: {type(manager.cfg).__name__}")
 
 
+def test_cir_manager_initialization_with_custom_num_bs_ant():
+    """Test CIRManager initialization with custom num_bs_ant."""
+    for num_bs_ant in [16, 32]:
+        cfg = Config(num_bs_ant=num_bs_ant)
+        manager = CIRManager(config=cfg)
+
+        # Check that num_bs_ant is correctly set
+        assert manager.num_bs_ant == num_bs_ant
+        assert manager.cfg.num_bs_ant == num_bs_ant
+
+        print(f"\n[CIR Manager Init - num_bs_ant={num_bs_ant}]:")
+        print(f"  manager.num_bs_ant: {manager.num_bs_ant}")
+
+
 def test_cir_manager_solver_parameters():
     """Test that solver parameters are correctly initialized."""
     manager = CIRManager()

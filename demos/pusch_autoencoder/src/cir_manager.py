@@ -26,13 +26,18 @@ Typical usage follows two phases:
 
 **Generation Phase** (run once, offline)::
 
-    manager = CIRManager()
-    manager.generate_and_save([0, 1, 2])  # Generate 3 files with different seeds
+    # Generate CIR data for 16 BS antennas
+    python -m demos.pusch_autoencoder.src.cir_manager --num_bs_ant 16 --seeds 0 1 2
+
+    # Generate CIR data for 32 BS antennas
+    python -m demos.pusch_autoencoder.src.cir_manager --num_bs_ant 32 --seeds 0 1 2
 
 **Training Phase** (run many times)::
 
-    manager = CIRManager()
+    cfg = Config(num_bs_ant=16)  # or 32
+    manager = CIRManager(config=cfg)
     a, tau = manager.load_from_tfrecord(group_for_mumimo=True)
+    # Loads from ../cir_tfrecords_ant16 (or ant32)
     # a: [num_mu_samples, 1, 16, 4, 4, max_paths, 14]
     # tau: [num_mu_samples, 1, 4, max_paths]
 """
@@ -577,16 +582,15 @@ class CIRManager:
 
         print(f"  Saved {len(a)} samples to {filename}")
 
-    def load_from_tfrecord(
-        self, tfrecord_dir="../cir_tfrecords", group_for_mumimo=False
-    ):
+    def load_from_tfrecord(self, tfrecord_dir=None, group_for_mumimo=False):
         """
         Load CIR data from TFRecord files with optional MU-MIMO grouping.
 
         Parameters
         ----------
-        tfrecord_dir : str
+        tfrecord_dir : str, optional
             Directory containing TFRecord files, relative to this module.
+            If not provided, defaults to ``../cir_tfrecords_ant{num_bs_ant}``.
         group_for_mumimo : bool
             If ``True``, groups ``num_ue`` individual CIRs into MU-MIMO samples.
             This simulates co-scheduled uplink transmissions.
@@ -615,6 +619,10 @@ class CIRManager:
         independent UE position, and combining them simulates the realistic
         scenario where multiple UEs transmit simultaneously.
         """
+        # Default directory includes antenna count
+        if tfrecord_dir is None:
+            tfrecord_dir = f"../cir_tfrecords_ant{self.num_bs_ant}"
+
         cir_dir = os.path.join(os.path.dirname(__file__), tfrecord_dir)
         cir_files = tf.io.gfile.glob(os.path.join(cir_dir, "*.tfrecord"))
 
@@ -698,7 +706,7 @@ class CIRManager:
         num_ue=None,
         num_ue_ant=None,
         num_time_steps=None,
-        tfrecord_dir="../cir_tfrecords",
+        tfrecord_dir=None,
     ):
         """
         Build CIRDataset channel model from TFRecord files.
@@ -721,8 +729,9 @@ class CIRManager:
             UE antenna count. Default from config.
         num_time_steps : int, optional
             OFDM symbols per slot. Default from config.
-        tfrecord_dir : str
+        tfrecord_dir : str, optional
             Directory containing TFRecord files.
+            If not provided, defaults to ``../cir_tfrecords_ant{num_bs_ant}``.
 
         Returns
         -------
@@ -747,6 +756,7 @@ class CIRManager:
         )
 
         # Load raw CIR data (not MU-MIMO grouped for CIRDataset)
+        # tfrecord_dir=None will use the antenna-specific default in load_from_tfrecord
         all_a, all_tau = self.load_from_tfrecord(tfrecord_dir)
         max_num_paths = all_a.shape[-2]
 
@@ -800,7 +810,7 @@ class CIRManager:
     def generate_and_save(
         self,
         seed_offsets,
-        tfrecord_dir="../cir_tfrecords",
+        tfrecord_dir=None,
         save_radio_map=True,
     ):
         """
@@ -815,8 +825,9 @@ class CIRManager:
         seed_offsets : int or list of int
             Random seed offset(s) for UE position sampling.
             Each seed produces a separate TFRecord file.
-        tfrecord_dir : str
+        tfrecord_dir : str, optional
             Output directory for TFRecord files (relative to this module).
+            If not provided, defaults to ``../cir_tfrecords_ant{num_bs_ant}``.
         save_radio_map : bool
             If ``True``, saves radio map and UE position visualizations.
 
@@ -834,7 +845,13 @@ class CIRManager:
         1. Increasing total dataset size beyond single-file limits
         2. Enabling parallel generation on multiple machines
         3. Creating train/validation/test splits with different seeds
+
+        The output directory includes the antenna count suffix to keep
+        CIR data for different antenna configurations separate.
         """
+        # Default directory includes antenna count for separation
+        if tfrecord_dir is None:
+            tfrecord_dir = f"../cir_tfrecords_ant{self.num_bs_ant}"
         # Normalize input to list
         if isinstance(seed_offsets, (int, np.integer)):
             seed_list = [int(seed_offsets)]
@@ -897,10 +914,36 @@ class CIRManager:
 # Main Entry Point for Standalone CIR Generation
 # =============================================================================
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Generate CIR data for PUSCH autoencoder training."
+    )
+    parser.add_argument(
+        "--num_bs_ant",
+        type=int,
+        default=16,
+        choices=[16, 32],
+        help="Number of BS antennas (default: 16)",
+    )
+    parser.add_argument(
+        "--seeds",
+        type=int,
+        nargs="+",
+        default=[0],
+        help="Seed offset(s) for CIR generation (default: [0])",
+    )
+
+    args = parser.parse_args()
+
     print("\n CIR Generation Started")
+    print(f"  num_bs_ant: {args.num_bs_ant}")
+    print(f"  seeds: {args.seeds}")
+
     try:
-        cir_manager = CIRManager()
-        cir_manager.generate_and_save([0])
+        cfg = Config(num_bs_ant=args.num_bs_ant)
+        cir_manager = CIRManager(config=cfg)
+        cir_manager.generate_and_save(args.seeds)
         print("\n CIR Generation Completed Successfully \n")
     except Exception as e:
         print("\n!!! CIR Generation Failed !!!")
