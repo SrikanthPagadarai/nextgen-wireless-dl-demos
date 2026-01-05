@@ -23,7 +23,8 @@ Output
 ------
 All plots are saved to ``results/`` directory:
 
-- ``bler_plot_bs{batch}_ue{ue}_ant{bs}x{ue}.png``: BLER comparison
+- ``bler_plot_ue{ue}_ant{bs}x{ue}.png``: BLER comparison
+- ``ber_plot_ue{ue}_ant{bs}x{ue}.png``: BER comparison
 - ``training_loss_ant{num_bs_ant}.png``: Loss curve with best iteration marked
 - ``constellation_normalized_ant{num_bs_ant}.png``: Final trained vs standard 16-QAM
 - ``constellation_iter_{N}_ant{num_bs_ant}.png``: Intermediate constellation snapshots
@@ -41,6 +42,12 @@ Interpretation Guide
 - Perfect CSI curve shows theoretical upper bound
 - Gap between perfect and imperfect CSI is the "CSI penalty"
 - Autoencoder should approach or exceed imperfect CSI baseline
+
+**BER Plot**:
+
+- Shows bit-level error rate (finer granularity than BLER)
+- Useful for understanding uncoded performance
+- Lower BER generally correlates with lower BLER after decoding
 
 **Constellation Plot**:
 
@@ -202,11 +209,58 @@ for num_bs_ant in NUM_BS_ANT_VALUES:
     outfile = os.path.join(
         DEMO_DIR,
         "results",
-        f"bler_plot_bs{batch_size}_ue{num_ue}_ant{num_bs_ant}x{num_ue_ant}.png",
+        f"bler_plot_ue{num_ue}_ant{num_bs_ant}x{num_ue_ant}.png",
     )
     plt.savefig(outfile, dpi=300, bbox_inches="tight")
     plt.close()
     print(f"Saved BLER plot to {outfile}")
+
+    # =========================================================================
+    # BER Comparison Plot
+    # =========================================================================
+    # Compare baseline LMMSE (perfect/imperfect CSI) against trained autoencoder
+    # BER provides finer granularity than BLER for understanding bit-level performance
+    if "ber" in baseline_data and "ber" in inference_data:
+        ber = baseline_data[
+            "ber"
+        ]  # Shape: [2, num_snr_points] - [perfect_csi, imperfect_csi]
+        inference_ber = inference_data["ber"]
+
+        plt.figure()
+        for idx, csi_label in enumerate(["(Perfect CSI)", "(Imperfect CSI)"]):
+            plt.semilogy(
+                ebno_db,
+                ber[idx],
+                marker="o",
+                linestyle="-",
+                label=f"LMMSE {csi_label}",
+            )
+        plt.semilogy(
+            ebno_db,
+            inference_ber,
+            marker="o",
+            linestyle="-",
+            label="Neural MIMO Detector (Imperfect CSI)",
+        )
+        plt.xlabel("Eb/N0 [dB]")
+        plt.ylabel("BER")
+        plt.title(f"PUSCH - BER vs Eb/N0 ({num_bs_ant} BS Antennas)")
+        plt.grid(True, which="both")
+        plt.legend()
+
+        ber_outfile = os.path.join(
+            DEMO_DIR,
+            "results",
+            f"ber_plot_ue{num_ue}_ant{num_bs_ant}x{num_ue_ant}.png",
+        )
+        plt.savefig(ber_outfile, dpi=300, bbox_inches="tight")
+        plt.close()
+        print(f"Saved BER plot to {ber_outfile}")
+    else:
+        print(
+            f"Warning: BER data not found in baseline or inference results. "
+            f"Skipping BER plot for {num_bs_ant} antennas."
+        )
 
     # =========================================================================
     # Training Loss Analysis
