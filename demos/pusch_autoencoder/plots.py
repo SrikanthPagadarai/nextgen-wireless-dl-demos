@@ -23,8 +23,8 @@ Output
 ------
 All plots are saved to ``results/`` directory:
 
-- ``bler_plot_ue{ue}_ant{bs}x{ue}.png``: BLER comparison
-- ``ber_plot_ue{ue}_ant{bs}x{ue}.png``: BER comparison
+- ``bler_plot_{num_bs}bs_{num_bs_ant}bs_ant_x_{num_ue}ue_{num_ue_ant}ue_ant.png``: BLER comparison
+- ``ber_plot_{num_bs}bs_{num_bs_ant}bs_ant_x_{num_ue}ue_{num_ue_ant}ue_ant.png``: BER comparison
 - ``training_loss_ant{num_bs_ant}.png``: Loss curve with best iteration marked
 - ``constellation_normalized_ant{num_bs_ant}.png``: Final trained vs standard 16-QAM
 - ``constellation_iter_{N}_ant{num_bs_ant}.png``: Intermediate constellation snapshots
@@ -143,6 +143,7 @@ for num_bs_ant in NUM_BS_ANT_VALUES:
     batch_size = _cfg.batch_size
     num_ue = _cfg.num_ue
     num_ue_ant = _cfg.num_ue_ant
+    num_bs = _cfg.num_bs
 
     ant_suffix = f"_ant{num_bs_ant}"
 
@@ -191,7 +192,7 @@ for num_bs_ant in NUM_BS_ANT_VALUES:
             bler[idx],
             marker="o",
             linestyle="-",
-            label=f"LMMSE {csi_label}",
+            label=f"Conventional Detector {csi_label}",
         )
     plt.semilogy(
         ebno_db,
@@ -209,7 +210,7 @@ for num_bs_ant in NUM_BS_ANT_VALUES:
     outfile = os.path.join(
         DEMO_DIR,
         "results",
-        f"bler_plot_ue{num_ue}_ant{num_bs_ant}x{num_ue_ant}.png",
+        f"bler_plot_{num_bs}bs_{num_bs_ant}bs_ant_x_{num_ue}ue_{num_ue_ant}ue_ant.png",
     )
     plt.savefig(outfile, dpi=300, bbox_inches="tight")
     plt.close()
@@ -233,7 +234,7 @@ for num_bs_ant in NUM_BS_ANT_VALUES:
                 ber[idx],
                 marker="o",
                 linestyle="-",
-                label=f"LMMSE {csi_label}",
+                label=f"Conventional Detector {csi_label}",
             )
         plt.semilogy(
             ebno_db,
@@ -251,7 +252,7 @@ for num_bs_ant in NUM_BS_ANT_VALUES:
         ber_outfile = os.path.join(
             DEMO_DIR,
             "results",
-            f"ber_plot_ue{num_ue}_ant{num_bs_ant}x{num_ue_ant}.png",
+            f"ber_plot_{num_bs}bs_{num_bs_ant}bs_ant_x_{num_ue}ue_{num_ue_ant}ue_ant.png",
         )
         plt.savefig(ber_outfile, dpi=300, bbox_inches="tight")
         plt.close()
