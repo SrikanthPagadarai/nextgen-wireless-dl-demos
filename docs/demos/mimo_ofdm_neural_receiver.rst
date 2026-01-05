@@ -8,11 +8,11 @@ This demo implements a neural network-based receiver for MIMO-OFDM wireless comm
 
 The neural receiver replaces the traditional receiver chain—channel estimation, equalization, and demapping—with a learned convolutional neural network that directly maps received signals and noise power estimates to Log-Likelihood Ratios (LLRs) for channel decoding. This end-to-end approach allows the network to jointly optimize these operations, potentially achieving better performance than the cascaded baseline, particularly under imperfect channel state information (CSI).
 
-.. image:: /_static/neural_rx_mimo_ofdm_system_light.svg
+.. image:: /_static/neural_rx/neural_rx_mimo_ofdm_system_light.svg
    :class: only-light
    :alt: MIMO-OFDM Neural Receiver System
 
-.. image:: /_static/neural_rx_mimo_ofdm_system_dark.svg
+.. image:: /_static/neural_rx/neural_rx_mimo_ofdm_system_dark.svg
    :class: only-dark
    :alt: MIMO-OFDM Neural Receiver System
 
@@ -35,15 +35,28 @@ Neural Receiver
 
 The neural receiver architecture, implemented in :class:`~demos.mimo_ofdm_neural_receiver.src.neural_rx.NeuralRx`, is a fully convolutional network inspired by the DeepRx architecture. The network processes the received resource grid as a 2D image where the spatial dimensions correspond to OFDM symbols (time) and subcarriers (frequency), with channels representing the real and imaginary parts of each receive antenna plus the noise power estimate.
 
-.. image:: /_static/neural_rx_network_light.svg
+.. image:: /_static/neural_rx/neural_rx_network_light.svg
    :class: only-light
    :alt: Neural Receiver Architecture
 
-.. image:: /_static/neural_rx_network_dark.svg
+.. image:: /_static/neural_rx/neural_rx_network_dark.svg
    :class: only-dark
    :alt: Neural Receiver Architecture
 
-The architecture consists of an input convolutional layer that projects the concatenated input features to 128 (or 512 during training) feature channels, followed by a stack of 4–12 residual blocks. Each :class:`~demos.mimo_ofdm_neural_receiver.src.neural_rx.ResidualBlock` contains layer normalization, ReLU activation, and 3×3 convolutions with skip connections (see ``neural_rx.py:10-43``). The output convolutional layer produces per-subcarrier LLRs for each stream and bit position, which are then reshaped and passed through a ``ResourceGridDemapper`` before LDPC decoding.
+The architecture consists of an input convolutional layer that projects the concatenated input features to 128 (or 512 during training) feature channels, followed by a stack of 4–12 residual blocks. Each :class:`~demos.mimo_ofdm_neural_receiver.src.neural_rx.ResidualBlock` contains layer normalization, ReLU activation, and 3×3 convolutions with skip connections. The output convolutional layer produces per-subcarrier LLRs for each stream and bit position, which are then reshaped and passed through a ``ResourceGridDemapper`` before LDPC decoding.
+
+.. code-block:: python
+   :caption: Residual block forward pass (``neural_rx.py:115-152``)
+
+    def call(self, inputs):
+        z = inputs
+        for ln, conv in zip(self._layer_norms, self._convs):
+            tf.debugging.assert_type(z, tf.float32)
+            z = ln(z)
+            z = relu(z)
+            z = conv(z)
+        # Skip connection: enables gradient flow and residual learning
+        return z + inputs
 
 
 Training

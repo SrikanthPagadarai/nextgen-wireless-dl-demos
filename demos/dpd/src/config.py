@@ -1,7 +1,7 @@
 """
 Central configuration for the DPD demo.
 
-This module provides a frozen configuration dataclass that ensures consistent
+Provides a configuration dataclass that ensures consistent
 parameters across all DPD system components. The design uses immutable defaults
 for RF/OFDM parameters to guarantee reproducible experiments, while allowing
 batch_size and seed customization for training flexibility.

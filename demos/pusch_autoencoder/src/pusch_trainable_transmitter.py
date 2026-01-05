@@ -104,6 +104,7 @@ class PUSCHTrainableTransmitter(PUSCHTransmitter):
         """
         return [self._points_r, self._points_i]
 
+    # [get-normalized-constellation-start]
     def get_normalized_constellation(self):
         """
         Compute centered and power-normalized constellation points.
@@ -144,6 +145,8 @@ class PUSCHTrainableTransmitter(PUSCHTransmitter):
         points = points / tf.cast(tf.sqrt(energy), points.dtype)
 
         return points
+
+    # [get-normalized-constellation-end]
 
     def _setup_custom_constellation(self):
         """

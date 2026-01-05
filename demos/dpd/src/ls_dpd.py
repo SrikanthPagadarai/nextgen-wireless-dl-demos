@@ -487,6 +487,7 @@ class LeastSquaresDPD(tf.keras.layers.Layer):
         """
         return self.predistort(x)
 
+    # [ls-estimation-start]
     def _ls_estimation(self, X, y):
         """
         Compute least-squares coefficient estimate.
@@ -522,3 +523,5 @@ class LeastSquaresDPD(tf.keras.layers.Layer):
 
         # Regularized least-squares via TensorFlow's lstsq.
         return tf.linalg.lstsq(X_slice, y_slice, l2_regularizer=1e-3)
+
+    # [ls-estimation-end]
