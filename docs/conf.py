@@ -39,6 +39,35 @@ html_theme_options = {
 
 # -- Extension configuration -------------------------------------------------
 
+# Mock imports for heavy dependencies that aren't needed for documentation
+autodoc_mock_imports = [
+    "tensorflow",
+    "tensorflow.keras",
+    "tensorflow.keras.layers",
+    "tensorflow.keras.Model",
+    "tensorflow.nn",
+    "tf",
+    "sionna",
+    "sionna.phy",
+    "sionna.phy.ofdm",
+    "sionna.phy.mapping",
+    "sionna.phy.fec",
+    "sionna.phy.fec.ldpc",
+    "sionna.phy.channel",
+    "sionna.phy.channel.tr38901",
+    "sionna.phy.mimo",
+    "sionna.phy.nr",
+    "sionna.phy.nr.utils",
+    "sionna.phy.signal",
+    "sionna.phy.utils",
+    "sionna.rt",
+    "numpy",
+    "np",
+    "scipy",
+    "scipy.signal",
+    "matplotlib",
+]
+
 # Napoleon settings (for Google/NumPy style docstrings)
 napoleon_google_docstring = True
 napoleon_numpy_docstring = True
