@@ -6,42 +6,6 @@ combines the reliability of LS channel estimation and LMMSE equalization
 with the adaptability of neural networks. The key motivation behind this
 design is that learning residual corrections to classical estimates is
 more stable than learning detection from scratch.
-
-Architecture Overview::
-
-    ┌─────────────────────────────────────────────────────────────────────┐
-    │                         Input Features                               │
-    │  (h_ls, y, z_mf, Gram matrix, err_var, noise variance)             │
-    └─────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-    ┌─────────────────────────────────────────────────────────────────────┐
-    │                       Shared Backbone                                │
-    │            Conv2D → ResBlocks (learn joint representations)         │
-    └─────────────────────────────────────────────────────────────────────┘
-                                    │
-                    ┌───────────────┴───────────────┐
-                    ▼                               ▼
-    ┌───────────────────────────┐   ┌───────────────────────────────────┐
-    │      CE Refinement Head    │   │     (features passed through)     │
-    │   Δh, Δlog(err_var)       │   │                                   │
-    └───────────────────────────┘   └───────────────────────────────────┘
-                    │                               │
-                    ▼                               │
-    ┌───────────────────────────┐                   │
-    │   Classical LMMSE with    │                   │
-    │   refined h, err_var      │                   │
-    └───────────────────────────┘                   │
-                    │                               │
-                    └───────────────┬───────────────┘
-                                    ▼
-    ┌─────────────────────────────────────────────────────────────────────┐
-    │                    Detection Continuation                            │
-    │         ResBlocks → LLR correction (refine LMMSE soft outputs)      │
-    └─────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-                            Final LLRs
 """
 
 import tensorflow as tf
