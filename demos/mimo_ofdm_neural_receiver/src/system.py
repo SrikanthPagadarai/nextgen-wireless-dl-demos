@@ -34,7 +34,7 @@ from tensorflow.keras import Model
 from .config import Config, BitsPerSym, CDLModel
 from .csi import CSI
 from .tx import Tx
-from .channel import Channel
+from sionna.phy.channel import ApplyOFDMChannel
 from .rx import Rx
 from .neural_rx import NeuralRx
 
@@ -212,7 +212,7 @@ class System(Model):
         # Tx: channel coding disabled during training to allow gradient flow
         self._tx = Tx(self._cfg, self._training)
 
-        self._ch = Channel()
+        self._ch = ApplyOFDMChannel(add_awgn=True)
 
         # Baseline Rx: conventional LMMSE receiver (not used during training)
         self._rx = Rx(self._cfg, self._csi)
@@ -343,7 +343,8 @@ class System(Model):
         # Transmission and Channel
         # =====================================================================
         tx_out = self._tx(batch_size)
-        y_out = self._ch(tx_out["x_rg"], h_freq, no)
+        y = self._ch(tx_out["x_rg"], h_freq, no)
+        y_out = {"y": y}
 
         # =====================================================================
         # Reception
