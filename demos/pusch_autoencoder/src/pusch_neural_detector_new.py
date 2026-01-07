@@ -6,42 +6,6 @@ combines the reliability of LS channel estimation and LMMSE equalization
 with the adaptability of neural networks. The key motivation behind this
 design is that learning residual corrections to classical estimates is
 more stable than learning detection from scratch.
-
-Architecture Overview::
-
-    ┌─────────────────────────────────────────────────────────────────────┐
-    │                         Input Features                               │
-    │  (h_ls, y, z_mf, Gram matrix, err_var, noise variance)             │
-    └─────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-    ┌─────────────────────────────────────────────────────────────────────┐
-    │                       Shared Backbone                                │
-    │            Conv2D → ResBlocks (learn joint representations)         │
-    └─────────────────────────────────────────────────────────────────────┘
-                                    │
-                    ┌───────────────┴───────────────┐
-                    ▼                               ▼
-    ┌───────────────────────────┐   ┌───────────────────────────────────┐
-    │      CE Refinement Head    │   │     (features passed through)     │
-    │   Δh, Δlog(err_var)       │   │                                   │
-    └───────────────────────────┘   └───────────────────────────────────┘
-                    │                               │
-                    ▼                               │
-    ┌───────────────────────────┐                   │
-    │   Classical LMMSE with    │                   │
-    │   refined h, err_var      │                   │
-    └───────────────────────────┘                   │
-                    │                               │
-                    └───────────────┬───────────────┘
-                                    ▼
-    ┌─────────────────────────────────────────────────────────────────────┐
-    │                    Detection Continuation                            │
-    │         ResBlocks → LLR correction (refine LMMSE soft outputs)      │
-    └─────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-                            Final LLRs
 """
 
 import tensorflow as tf
@@ -77,7 +41,7 @@ class Conv2DResBlock(Layer):
     -----
     - Uses LayerNormalization (not BatchNorm) for stable training with
       small batch sizes typical in communication system simulation.
-    - LeakyReLU with α=0.1 prevents dead neurons while maintaining
+    - LeakyReLU with alpha=0.1 prevents dead neurons while maintaining
       near-linear behavior for small negative inputs.
     - Identity skip connection requires input and output channel counts
       to match; caller must ensure ``filters`` equals input channels.
@@ -140,8 +104,9 @@ class PUSCHNeuralDetector(Layer):
     2. **Shared backbone**: Processes features through convolutional ResBlocks
        to learn joint representations useful for both CE refinement and detection.
 
-    3. **CE refinement head**: Predicts additive corrections Δh and multiplicative
-       log-domain corrections Δlog(err_var) to the LS estimates.
+    3. **CE refinement head**: Projects shared features through 1x1 convolutions
+       to predict additive corrections delta-h, and multiplicative log-domain
+       corrections delta-log(err_var), to the LS estimates.
 
     4. **Scaled correction application**: Applies learned corrections scaled by
        trainable parameters that start at zero, enabling gradual departure from
@@ -150,8 +115,9 @@ class PUSCHNeuralDetector(Layer):
     5. **Classical LMMSE**: Performs LMMSE equalization using refined channel
        estimate and error variance, followed by max-log demapping.
 
-    6. **LLR refinement**: Injects LMMSE outputs back into the network to
-       predict additive LLR corrections, again scaled by a trainable parameter.
+    6. **LLR refinement**: Processes LMMSE outputs (equalized symbols, effective
+       noise, baseline LLRs) through ResBlocks to predict additive LLR
+       corrections, again scaled by a trainable parameter.
 
     Parameters
     ----------
@@ -169,26 +135,6 @@ class PUSCHNeuralDetector(Layer):
         capacity for LLR refinement. Default 6.
     kernel_size : tuple of int
         Spatial kernel size for ResBlock convolutions. Default ``(3, 3)``.
-
-    Pre-conditions
-    --------------
-    - ``cfg.pusch_pilot_indices`` must be set (by ``PUSCHLinkE2E``) before
-      instantiation to enable pilot/data symbol separation.
-    - Input tensors must follow Sionna's PUSCH dimension conventions.
-
-    Post-conditions
-    ---------------
-    - ``trainable_variables`` returns correction scales first, then network
-      weights (enables separate optimizer configuration).
-    - ``last_h_hat_refined`` and ``last_err_var_refined`` contain the most
-      recent refined estimates (useful for auxiliary losses).
-
-    Invariants
-    ----------
-    - Correction scales initialized to 0.0, so initial behavior matches
-      classical LMMSE exactly (graceful degradation if training fails).
-    - Error variance correction scale is always positive (softplus transform).
-    - Output LLR shape matches Sionna's ``PUSCHReceiver`` expectations.
 
     Example
     -------
@@ -284,8 +230,10 @@ class PUSCHNeuralDetector(Layer):
 
         # Error variance correction in log domain for numerical stability:
         # err_var_refined = exp(log(err_var) + scale * delta_log_err)
-        # Uses softplus(raw_value) to ensure positivity; softplus(0) = ln(2) ≈ 0.69
-        # but we want initial scale ≈ 1.0, and softplus(0.54) ≈ 1.0
+        # Uses softplus(raw_value) to ensure positivity;
+        # softplus(0) = ln(2) = (approximately) 0.69
+        # but we want initial scale = (approximately) 1.0,
+        # and softplus(0.54) = (approximately) 1.0
         # For simplicity, initialize to 0.0; the network will adapt.
         self._err_var_correction_scale_raw = tf.Variable(
             0.0, trainable=True, name="err_var_correction_scale_raw", dtype=tf.float32
@@ -449,8 +397,7 @@ class PUSCHNeuralDetector(Layer):
         vars_ += self._shared_conv_in.trainable_variables
         for block in self._shared_res_blocks:
             vars_ += block.trainable_variables
-        # CE head
-        vars_ += self._ce_head_conv1.trainable_variables
+        # CE head (direct projections only)
         vars_ += self._ce_head_out_h.trainable_variables
         vars_ += self._ce_head_out_loge.trainable_variables
         # Detection continuation
@@ -520,19 +467,21 @@ class PUSCHNeuralDetector(Layer):
             Received OFDM signal after FFT.
             Shape: ``[B, num_bs, num_bs_ant, num_ofdm_syms, num_subcarriers]``
         h_hat : tf.Tensor, complex64
-            LS channel estimate from DMRS processing.
+            LS channel estimate from pilot symbols.
             Shape: ``[B, num_bs, num_bs_ant, num_ue, num_streams, num_ofdm_syms, num_subcarriers]``
         err_var : tf.Tensor, float32
-            Channel estimation error variance per stream and RE.
-            Shape: ``[B, 1, 1, num_ue, num_streams, num_ofdm_syms, num_subcarriers]``
+            Channel estimation error variance.
+            Shape: ``[B, num_bs, num_bs_ant, num_ue, num_streams, num_ofdm_syms, num_subcarriers]``
+            or broadcastable variant.
         no : tf.Tensor, float32
-            Noise variance, shape ``[B]`` or scalar.
+            Noise variance per batch element. Shape: ``[B]`` or ``[B, 1, 1, ...]``.
         constellation : tf.Tensor, complex64, optional
-            Trainable constellation points from transmitter. If provided,
-            updates the demapper's constellation for consistent symbol mapping.
-            Shape: ``[num_constellation_points]``
+            Constellation points for demapping. If provided, overrides the
+            internal constellation (useful for learned constellations).
+            Shape: ``[num_points]``.
         training : bool, optional
-            Training mode flag (currently unused, for Keras API compatibility).
+            Training mode flag (currently unused but included for Keras API
+            compatibility).
 
         Returns
         -------
@@ -542,118 +491,116 @@ class PUSCHNeuralDetector(Layer):
 
         Notes
         -----
-        The processing flow:
+        The function extracts extensive features from inputs, processes them
+        through the shared backbone, applies CE refinement, performs LMMSE
+        equalization, and finally refines the LLRs. The three trainable scales
+        control how much the neural corrections contribute vs. classical
+        processing.
 
-        1. **Feature assembly**: Extracts and concatenates multiple signal
-           representations (channel, received signal, matched filter, Gram
-           matrix structure, estimation error, noise level).
-
-        2. **Shared backbone**: Processes features through ResBlocks to learn
-           joint representations.
-
-        3. **CE refinement**: Predicts channel and error variance corrections,
-           applies them scaled by trainable parameters.
-
-        4. **LMMSE equalization**: Classical equalization with refined estimates,
-           using whitened interference model for improved performance.
-
-        5. **LLR refinement**: Predicts additive corrections to LMMSE LLRs,
-           enabling learned compensation for model mismatch.
-
-        Channel estimation refinement operates on ALL OFDM symbols (including
-        pilots) to leverage full spatial-frequency context, while detection
-        operates only on DATA symbols to produce the final LLRs.
+        Side effects: Updates ``self.last_h_hat_refined``,
+        ``self.last_err_var_refined``, and ``self.last_err_var_refined_flat``
+        with refined estimates for auxiliary loss computation.
         """
-        # =====================================================================
-        # Input Preparation
-        # =====================================================================
-        y = tf.cast(y, tf.complex64)
-        h_hat = tf.cast(h_hat, tf.complex64)
-        err_var = tf.cast(err_var, tf.float32)
-        no = tf.cast(no, tf.float32)
-
-        # Synchronize demapper constellation with transmitter if trainable
+        # Update constellation for demapper if provided (e.g., learned TX constellation)
         if constellation is not None:
             self._constellation.points = tf.cast(constellation, tf.complex64)
 
-        # Precompute data symbol indices for later slicing
-        data_idx = tf.constant(self._data_symbol_indices, dtype=tf.int32)
-
         # =====================================================================
-        # Extract Dimensions
+        # Dimension Extraction and Validation
         # =====================================================================
-        # Process full OFDM grid for CE refinement (pilots provide context)
-        B = tf.shape(y)[0]
-        H = tf.shape(y)[3]  # num_ofdm_syms (including pilots)
-        W = tf.shape(y)[4]  # num_subcarriers
-
         S = self._num_streams_total
         Nr = self._num_rx_ant
 
+        B = tf.shape(y)[0]
+        H = tf.shape(y)[3]  # num_ofdm_symbols (includes pilots)
+        W = tf.shape(y)[4]  # num_subcarriers
+        data_idx = tf.constant(self._data_symbol_indices, dtype=tf.int32)
+
         # =====================================================================
-        # Reshape Inputs to Conv2D-Friendly Format [B, H, W, C]
+        # Reshape Inputs to Spatial [B, H, W, C] Format
         # =====================================================================
-        # Sionna uses [B, rx, tx, time, freq] convention; we reshape to
-        # [B, time, freq, features] for 2D convolution over the OFDM grid.
+        # Sionna uses dimension ordering optimized for FFT; we need spatial
+        # ordering for 2D convolutions. All reshapes preserve data layout.
 
         # y: [B, num_bs, num_bs_ant, H, W] -> [B, H, W, Nr]
-        y_flat = tf.reshape(y, [B, -1, H, W])
-        y_flat = tf.transpose(y_flat, [0, 2, 3, 1])
+        y_flat = tf.transpose(y[:, 0, :, :, :], [0, 2, 3, 1])
 
         # h_hat: [B, num_bs, num_bs_ant, num_ue, streams, H, W] -> [B, H, W, Nr, S]
-        h_flat = tf.reshape(h_hat, [B, -1, S, H, W])
-        h_flat = tf.transpose(h_flat, [0, 3, 4, 1, 2])
+        h_hat_t = h_hat[:, 0, :, :, :, :, :]  # [B, num_bs_ant, num_ue, streams, H, W]
+        h_hat_t = tf.reshape(
+            h_hat_t, [B, Nr, self._num_ue * self._num_streams_per_ue, H, W]
+        )
+        h_flat = tf.transpose(h_hat_t, [0, 3, 4, 1, 2])  # [B, H, W, Nr, S]
 
         # err_var: [B, 1, 1, num_ue, streams, H, W] -> [B, H, W, S]
-        err_var_t = tf.squeeze(err_var, axis=[1, 2])
-        err_var_flat = tf.transpose(err_var_t, [0, 3, 4, 1, 2])
-        err_var_flat = tf.reshape(err_var_flat, [B, H, W, S])
+        ev = tf.reshape(
+            err_var[:, 0, 0, :, :, :, :],
+            [B, self._num_ue * self._num_streams_per_ue, H, W],
+        )
+        err_var_flat = tf.transpose(ev, [0, 2, 3, 1])  # [B, H, W, S]
+
+        # no: ensure shape [B]
+        no = tf.reshape(no, [B])
 
         # =====================================================================
         # Compute Derived Features
         # =====================================================================
-        # These features provide the network with multiple views of the signal,
-        # each capturing different aspects of the channel and interference.
+        # These features provide the network with different "views" of the
+        # channel and signal that highlight different aspects of the MIMO
+        # detection problem.
 
-        # Matched filter output: z_mf = H^H @ y
-        # Captures signal energy and provides a sufficient statistic for detection
-        h_conj_t = tf.transpose(tf.math.conj(h_flat), [0, 1, 2, 4, 3])  # [B,H,W,S,Nr]
-        y_col = y_flat[..., tf.newaxis]  # [B,H,W,Nr,1]
-        z_mf = tf.squeeze(tf.matmul(h_conj_t, y_col), axis=-1)  # [B,H,W,S]
+        # Matched filter output: z_mf = H^H @ y (sufficient statistic)
+        # Shape: [B, H, W, S]
+        y_expanded = y_flat[..., tf.newaxis]  # [B, H, W, Nr, 1]
+        h_conj = tf.math.conj(h_flat)  # [B, H, W, Nr, S]
+        z_mf = tf.reduce_sum(h_conj * y_expanded, axis=-2)  # [B, H, W, S]
 
-        # Gram matrix: G = H^H @ H
-        # Diagonal elements indicate per-stream channel gain
-        # Off-diagonal elements capture inter-stream interference
-        gram = tf.matmul(h_conj_t, h_flat)  # [B,H,W,S,S]
-        gram_diag = tf.math.real(tf.linalg.diag_part(gram))  # [B,H,W,S]
+        # Gram matrix: G = H^H @ H captures interference structure
+        # Shape: [B, H, W, S, S]
+        h_expanded = h_flat[..., tf.newaxis]  # [B, H, W, Nr, S, 1]
+        h_conj_expanded = h_conj[..., tf.newaxis, :]  # [B, H, W, Nr, 1, S]
+        gram = tf.reduce_sum(h_expanded * h_conj_expanded, axis=-3)  # [B, H, W, S, S]
 
-        # Extract off-diagonal elements (interference structure)
-        mask = 1.0 - tf.eye(S, dtype=tf.float32)
-        mask = mask[tf.newaxis, tf.newaxis, tf.newaxis, :, :]
-        gram_masked = gram * tf.cast(mask, gram.dtype)
-        gram_offdiag = tf.abs(gram_masked)
-        gram_offdiag_flat = tf.reshape(gram_offdiag, [B, H, W, -1])
-        # Select only off-diagonal entries (S*(S-1) values per RE)
-        indices = [i * S + j for i in range(S) for j in range(S) if i != j]
-        gram_offdiag_feats = tf.gather(gram_offdiag_flat, indices, axis=-1)
+        # Diagonal: per-stream channel power (related to SNR)
+        gram_diag = tf.math.real(tf.linalg.diag_part(gram))  # [B, H, W, S]
 
-        # Channel estimate features (real and imaginary parts)
-        h_flat_features = tf.reshape(h_flat, [B, H, W, Nr * S])
-        h_feats = tf.concat(
-            [tf.math.real(h_flat_features), tf.math.imag(h_flat_features)], axis=-1
+        # Off-diagonal: inter-stream interference (flattened, upper triangle)
+        # Extract unique off-diagonal elements to avoid redundancy
+        gram_offdiag_list = []
+        for i in range(S):
+            for j in range(S):
+                if i != j:
+                    gram_offdiag_list.append(gram[..., i, j])
+        gram_offdiag = tf.stack(gram_offdiag_list, axis=-1)  # [B, H, W, S*(S-1)]
+        gram_offdiag_feats = tf.concat(
+            [tf.math.real(gram_offdiag), tf.math.imag(gram_offdiag)], axis=-1
         )
 
-        # Received signal features (real and imaginary parts)
+        # =====================================================================
+        # Prepare Feature Tensors
+        # =====================================================================
+        # Split complex tensors into real/imag and flatten channel dimensions
+
+        # Channel estimate features: [B, H, W, 2*Nr*S]
+        h_flat_r = tf.math.real(h_flat)
+        h_flat_i = tf.math.imag(h_flat)
+        h_feats = tf.concat(
+            [
+                tf.reshape(h_flat_r, [B, H, W, Nr * S]),
+                tf.reshape(h_flat_i, [B, H, W, Nr * S]),
+            ],
+            axis=-1,
+        )
+
+        # Received signal features: [B, H, W, 2*Nr]
         y_feats = tf.concat([tf.math.real(y_flat), tf.math.imag(y_flat)], axis=-1)
 
-        # Matched filter features (real and imaginary parts)
+        # Matched filter features: [B, H, W, 2*S]
         z_mf_feats = tf.concat([tf.math.real(z_mf), tf.math.imag(z_mf)], axis=-1)
 
-        # Noise variance in log scale for numerical stability and scale invariance
-        no_log = log10(no + 1e-10)
-        no_feat = tf.broadcast_to(
-            no_log[:, tf.newaxis, tf.newaxis, tf.newaxis], [B, H, W, 1]
-        )
+        # Noise variance in log scale for numerical stability: [B, H, W, 1]
+        no_feat = log10(no + 1e-10)[:, tf.newaxis, tf.newaxis, tf.newaxis]
+        no_feat = tf.broadcast_to(no_feat, [B, H, W, 1])
 
         # =====================================================================
         # Assemble Shared Input Features
@@ -683,10 +630,9 @@ class PUSCHNeuralDetector(Layer):
         # =====================================================================
         # Channel Estimation Refinement Head
         # =====================================================================
-        ce_hidden = self._ce_head_conv1(shared_features)
-
-        delta_h_raw = self._ce_head_out_h(ce_hidden)  # [B,H,W, 2*Nr*S]
-        delta_loge = self._ce_head_out_loge(ce_hidden)  # [B,H,W, S]
+        # Direct 1x1 projection from shared features (no intermediate layers)
+        delta_h_raw = self._ce_head_out_h(shared_features)  # [B,H,W, 2*Nr*S]
+        delta_loge = self._ce_head_out_loge(shared_features)  # [B,H,W, S]
 
         # Parse channel correction into complex format
         delta_h_raw = tf.cast(delta_h_raw, tf.float32)
@@ -748,9 +694,6 @@ class PUSCHNeuralDetector(Layer):
         # =====================================================================
         # Slice to data symbols (exclude pilots) for detection
         y_flat_data = tf.gather(y_flat, data_idx, axis=1)  # [B, H_data, W, Nr]
-        shared_features_data = tf.gather(
-            shared_features, data_idx, axis=1
-        )  # [B, H_data, W, F]
         h_flat_refined_data = tf.gather(
             h_flat_refined, data_idx, axis=1
         )  # [B, H_data, W, Nr, S]
@@ -792,7 +735,8 @@ class PUSCHNeuralDetector(Layer):
         # =====================================================================
         # Build LMMSE Features for Detection Continuation
         # =====================================================================
-        # Provide the network with LMMSE outputs to enable learned refinement
+        # Detection operates solely on LMMSE outputs - the shared backbone
+        # features have already been consumed by CE refinement and LMMSE.
         x_lmmse_feats = tf.concat(
             [tf.math.real(x_lmmse), tf.math.imag(x_lmmse)], axis=-1
         )  # 2*S
@@ -811,13 +755,10 @@ class PUSCHNeuralDetector(Layer):
         # =====================================================================
         # Detection Continuation Network
         # =====================================================================
-        # Fuse shared backbone features with LMMSE outputs
-        combined_features = tf.concat([shared_features_data, lmmse_features], axis=-1)
+        # Process LMMSE features only (shared backbone features not included)
+        det_features = self._det_inject_conv(lmmse_features)
 
-        # Injection convolution reduces dimensions and fuses information
-        det_features = self._det_inject_conv(combined_features)
-
-        # Additional ResBlocks for LLR refinement
+        # ResBlocks for LLR refinement
         for block in self._det_res_blocks:
             det_features = block(det_features)
 
