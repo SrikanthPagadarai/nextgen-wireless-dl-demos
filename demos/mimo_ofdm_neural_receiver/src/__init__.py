@@ -4,14 +4,14 @@
 """
 MIMO-OFDM Neural Receiver source package.
 
-Exports: Config, CSI, Tx, Channel, Rx, NeuralRx, System.
+Exports: Config, CSI, Tx, Rx, NeuralRx, System.
 
 Uses lazy imports to defer TensorFlow/Sionna loading until first access.
 """
 
 from importlib import import_module
 
-__all__ = ["Config", "CSI", "Tx", "Channel", "Rx", "NeuralRx", "System"]
+__all__ = ["Config", "CSI", "Tx", "Rx", "NeuralRx", "System"]
 
 
 def __getattr__(name):
